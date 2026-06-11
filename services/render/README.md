@@ -1,9 +1,9 @@
-# sla-compiler spike — document JSON → Scribus SLA
+# render service — document JSON → Scribus SLA → PDF / proof
 
-The proven spike behind ide8.flow's render engine (PRD §13.1): a clean JSON
-document compiles to Scribus `.sla`, and headless Scribus (1.6.x) acts as the
+ide8.flow's render engine (PRD RND-1..4, RND-8): a clean JSON document
+compiles to Scribus `.sla`, and headless Scribus (1.6.x) acts as the
 layout/render engine, producing print PDFs with bleed, crop marks and
-spot-colour swatches.
+spot-colour swatches, plus raster proofs via poppler.
 
 ```
 document.json ──▶ sla_compiler.py ──▶ doc.sla ──▶ scribus -g -ns -py ──▶ PDF / raster proof
@@ -12,40 +12,60 @@ document.json ──▶ sla_compiler.py ──▶ doc.sla ──▶ scribus -g -
 ```
 
 **The document format is specified in [`docs/SCHEMA.md`](../../docs/SCHEMA.md)**
-(normative, reference v0.1). This README covers the spike artefacts, usage,
-and compiler implementation notes only.
+(normative, reference v0.1). This README covers the compiler, the FastAPI
+service, the Docker image, and implementation notes.
 
 ## Why this shape
 
 The LLM authors the **document**, never the SLA. The document is page-relative,
 declarative, and small; the compiler absorbs every Scribus quirk. The render
 loop (`compile → export PDF → rasterise → model inspects the image → mutate
-document`) was validated end-to-end during development, including catching and
+document`) was validated end-to-end during the spike, including catching and
 fixing a contrast bug purely from looking at the rendered proof.
 
 ## Files
 
-- `sla_compiler.py` — the compiler. Stdlib only, no dependencies.
+- `sla_compiler.py` — the compiler. Stdlib only. Byte-stable output
+  (deterministic item IDs); structural validation collects all errors as
+  `{code, path, message}` for generation repair loops (PRD GEN-3).
 - `template.sla` — donor boilerplate: an empty document saved by the target
   Scribus version (1.6.1 — this file *is* the version pin). Supplies ~170
-  `DOCUMENT` preference attributes and required children (`CheckProfile`,
-  `Printer`, `PDF`, `LAYERS`, `PageSets`, …). Regenerate it from any Scribus
-  version you want to pin to.
+  `DOCUMENT` preference attributes and required children. Regenerate with
+  `service/scribus_scripts/gen_donor.py` when bumping Scribus.
+- `service/app.py` — FastAPI service: `/compile`, `/proof`, `/package`,
+  `/fonts`, `/healthz`. Per-request temp dirs, no shared state.
+- `service/scribus_scripts/` — scripts that run *inside* headless Scribus:
+  `export_pdf.py` (SLA → PDF, proof/package modes), `gen_donor.py`.
 - `examples/example.json` — a 2-page POS header card exercising every feature.
-- `tests/golden/out.sla`, `tests/golden/out.pdf` — compiled output and headless
-  PDF export, as proof. These become real golden-file CI fixtures in M0, once
-  compilation is byte-stable (PRD RND-2).
+- `tests/` — unittest suite (golden byte-compare, determinism, error codes)
+  plus `check_separation.py`, the RND-3 acceptance check.
+- `tests/golden/out.sla` — golden fixture; byte-identical recompile is a CI
+  gate and an M0 exit criterion.
+- `Dockerfile` — ubuntu:24.04 (Scribus 1.6.1) + xvfb + poppler + fonts.
 
 ## Usage
 
+Compiler only (no Scribus needed):
+
 ```bash
-python3 sla_compiler.py examples/example.json out.sla
-xvfb-run -a scribus -g -ns -py export.py
+python3 sla_compiler.py examples/example.json out.sla            # template.sla auto-found
+python3 sla_compiler.py bad.json out.sla --errors-json           # {ok, errors} for repair loops
+python3 -m unittest discover tests                               # test suite
 ```
 
-`export.py` is illustrative — any Scribus scripter export script works; it is
-not part of the spike artefacts. The production export script ships with the
-render service (PRD RND-1).
+Full service:
+
+```bash
+docker build -t ide8-render .
+docker run --rm -p 8000:8000 ide8-render
+
+curl localhost:8000/healthz
+curl -X POST localhost:8000/compile -H 'content-type: application/json' \
+     --data @examples/example.json -o doc.sla
+curl -X POST 'localhost:8000/proof?dpi=150&page=1' --data-binary @doc.sla -o proof.png
+curl -X POST localhost:8000/package --data-binary @doc.sla -o out.pdf
+python3 tests/check_separation.py out.pdf CutContour             # RND-3 acceptance
+```
 
 ## Compile rules (what the compiler absorbs)
 
@@ -66,27 +86,30 @@ render service (PRD RND-1).
    (`CPARENT` for inline char-style overrides) + `<para>` separators +
    `<trail>` terminator.
 6. **Page mapping** via `OwnPage` on every object.
+7. **Deterministic item IDs** allocated sequentially in document order from
+   `ITEM_ID_BASE` — identical input compiles to byte-identical output.
 
-## Render-pipeline limits (spike state)
+## Render-pipeline limits (current state)
 
-- **Spot → PDF separation — verified open issue.** The spot flag round-trips
-  into Scribus (`isSpotColor` confirms it), but the spike's exported PDF
-  contains only `/Separation /All` (the registration colour from the crop
-  marks); the string `CutContour` appears nowhere in the PDF — the spot was
-  converted to process despite `usespot=True`. Consequence for testing:
-  asserting "PDF contains a `/Separation`" is a **false pass**; the M0
-  acceptance test must assert the *named* separation, `/Separation /CutContour`
-  (PRD RND-3). Suspected cause: colour-management prefs in a bare container.
-  Fallback: PitStop action-list spot recolouring (already licensed).
-- **Non-deterministic item IDs.** The spike compiler generates `ItemID` via
-  unseeded `random.randint`, so recompiling the same document produces a
-  different SLA. This violates the byte-stable compilation requirement
-  (PRD RND-2) and blocks golden-file CI; the fix is an M0 task.
+- **Spot → PDF separation — RESOLVED (RND-3).** Root cause was never CMS
+  prefs: `PDFfile.outdst` defaults to 0 (screen output), which converts all
+  colour to RGB — spots cannot survive that path regardless of `usespot`.
+  Package export sets `outdst = 1` (printer); the named
+  `/Separation /CutContour` is now present and gated in CI. Note for tests:
+  asserting "PDF contains a `/Separation`" is a **false pass** (crop marks
+  always contribute `/Separation /All`) — use `tests/check_separation.py`.
+- **Formal PDF/X conformance — open.** `/package` currently emits PDF 1.5
+  with spots preserved; a PDF/X-3/X-4 conformance flag needs CMS + output
+  intent configured (`PDFX_VERSION` env hook exists). PitStop preflight of
+  the packaged PDF is the remaining M0 exit check.
+- **Per-request Scribus spawn (RND-4).** Measured in-container: ~0.5 s per
+  headless export, ~0.6 s proof round trip over HTTP — already inside the
+  2 s p95 budget, so the warm-process pool is an optimisation held in
+  reserve, not a blocker.
 - **Version pinning.** SLA changes across the 1.5/1.6/1.7 series. The donor
-  template is the pin. Regenerate the donor + re-harvest object defaults when
-  upgrading.
+  template is the pin. Regenerate the donor (`gen_donor.py`) + re-harvest
+  object defaults + regenerate golden fixtures when upgrading.
 
-Roadmap beyond the spike (formal JSON Schema, render endpoints, validation
-layer) is tracked in the PRD by requirement ID — see `docs/PRD.md` §7.5–7.6
-and the M0/M1 milestones. This README intentionally carries no roadmap of its
-own.
+Roadmap beyond this service (formal JSON Schema, validation layer, IDML)
+is tracked in the PRD by requirement ID — see `docs/PRD.md` §7.5–7.6 and the
+M0/M1 milestones. This README intentionally carries no roadmap of its own.

@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  compiler-tests:
+    name: compiler unit tests (golden byte-compare)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run unittest suite
+        run: python3 -m unittest discover services/render/tests -v
+
+  render-image:
+    name: render service image + in-container smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t ide8-render services/render
+      - name: Unit tests inside image
+        run: docker run --rm ide8-render python3 -m unittest discover tests -v
+      - name: Compile + headless export + RND-3 separation acceptance
+        run: |
+          docker run --rm ide8-render bash -c '
+            set -e
+            python3 sla_compiler.py examples/example.json /tmp/doc.sla
+            xvfb-run -a scribus -g -ns -py service/scribus_scripts/export_pdf.py /tmp/doc.sla /tmp/out.pdf package
+            test -s /tmp/out.pdf && echo "export ok: $(stat -c%s /tmp/out.pdf) bytes"
+            python3 tests/check_separation.py /tmp/out.pdf CutContour
+          '
