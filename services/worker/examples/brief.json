@@ -1,0 +1,22 @@
+{
+  "title": "Summer Just Landed — Gondola End Header",
+  "brand": "Example Brand",
+  "format": {
+    "size": "A4",
+    "orientation": "portrait",
+    "bleed": 8.5,
+    "margins": [12, 12, 12, 12]
+  },
+  "copy": {
+    "headline": "SUMMER JUST LANDED",
+    "subhead": "Fresh picks for the season — aisle 4",
+    "body": [
+      "Printed on FSC-certified board with UV-cured inks for vivid, durable colour.",
+      "Part of the modular gondola-end kit — pair with shelf strips and aisle fins."
+    ],
+    "legal": null
+  },
+  "mandatoryElements": [],
+  "tone": "Bold, sunny, energetic retail. Confident hierarchy, generous colour blocking, no clutter.",
+  "notes": "Header card sits at eye level above the bay. Headline must read from 5 metres."
+}
