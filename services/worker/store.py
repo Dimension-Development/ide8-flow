@@ -92,6 +92,16 @@ class DocStore:
             "SELECT * FROM concept WHERE id = ?", (concept_id,)).fetchone()
         return self._concept_row(row) if row else None
 
+    def set_discarded(self, concept_id, discarded):
+        """REV-1 discard/restore — concept curation state is mutable;
+        doc_versions never are."""
+        with self._lock:
+            cur = self._db.execute(
+                "UPDATE concept SET discarded = ? WHERE id = ?",
+                (1 if discarded else 0, concept_id))
+            self._db.commit()
+            return cur.rowcount > 0
+
     @staticmethod
     def _concept_row(row):
         return {"id": row["id"], "brief": json.loads(row["brief_json"]),

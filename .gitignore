@@ -15,3 +15,5 @@ services/render/out.*
 # worker local store + generation output
 services/worker/data/
 out/
+node_modules/
+services/ui/dist/

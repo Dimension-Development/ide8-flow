@@ -24,6 +24,8 @@ spot-colour fix, golden-file CI).
 | [`docs/PRD.md`](docs/PRD.md) | Product requirements (v0.2) — the roadmap; requirement IDs map 1:1 to tasks |
 | [`docs/SCHEMA.md`](docs/SCHEMA.md) | Document schema reference — the normative spec for what the LLM authors |
 | [`services/render/`](services/render/) | Render engine: spike compiler, donor template (the Scribus version pin), examples, golden fixtures |
+| [`services/worker/`](services/worker/) | Generation worker: validation layer, Claude tool-use loop, prompt packs, immutable version store, API |
+| [`services/ui/`](services/ui/) | Review UI (M2): proof grid, concept detail with version timeline + mutation box (React/Vite/Tailwind) |
 
 Future services (`gateway/`, `worker/`, `ui/`) get sibling slots under
 `services/` as milestones land.

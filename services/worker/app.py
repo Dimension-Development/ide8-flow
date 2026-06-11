@@ -88,8 +88,39 @@ def generate(payload: dict = Body(...)):
 
 
 @app.get("/concepts")
-def concepts():
-    return {"concepts": _deps().list_concepts()}
+def concepts(include_discarded: bool = False):
+    store = _deps()
+    out = []
+    for c in store.list_concepts(include_discarded=include_discarded):
+        latest = store.latest_version(c["id"])
+        if latest is not None:
+            latest.pop("document", None)
+            c["latest"] = {
+                "id": latest["id"], "approved": latest["approved"],
+                "origin": latest["origin"], "has_proof": latest["has_proof"],
+                "created_at": latest["created_at"],
+                "validation_ok": latest["validation"].get("ok"),
+                "warnings": len(latest["validation"].get("warnings", [])),
+                "cost_usd": (latest["usage"] or {}).get("cost_usd"),
+            }
+        else:
+            c["latest"] = None
+        out.append(c)
+    return {"concepts": out}
+
+
+@app.post("/concepts/{concept_id}/discard")
+def discard(concept_id: str):
+    if not _deps().set_discarded(concept_id, True):
+        raise HTTPException(404, "unknown concept")
+    return {"ok": True}
+
+
+@app.post("/concepts/{concept_id}/restore")
+def restore(concept_id: str):
+    if not _deps().set_discarded(concept_id, False):
+        raise HTTPException(404, "unknown concept")
+    return {"ok": True}
 
 
 @app.get("/concepts/{concept_id}")

@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #1d2843;
+  --color-ink-soft: #4a557e;
+  --color-cream: #faf4e6;
+  --color-paper: #fffdf8;
+  --color-brand: #d8332e;
+}
+
+body {
+  @apply bg-cream text-ink antialiased;
+}

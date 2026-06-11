@@ -1,0 +1,125 @@
+import { useEffect, useState } from "react";
+import { api, type Concept } from "../api";
+import { ApprovalBadge, Cost, OriginBadge } from "./Badges";
+
+export default function ConceptGrid({
+  onOpen,
+}: {
+  onOpen: (id: string) => void;
+}) {
+  const [concepts, setConcepts] = useState<Concept[] | null>(null);
+  const [showDiscarded, setShowDiscarded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = (incl: boolean) =>
+    api
+      .concepts(incl)
+      .then((d) => setConcepts(d.concepts))
+      .catch((e) => setError(String(e)));
+
+  useEffect(() => {
+    load(showDiscarded);
+  }, [showDiscarded]);
+
+  if (error)
+    return (
+      <p className="text-brand">
+        Worker API unreachable — is it running on :8200? ({error})
+      </p>
+    );
+  if (!concepts) return <p className="text-ink-soft">Loading proof grid…</p>;
+
+  const briefTitle = concepts[0]?.brief?.title ?? "Untitled brief";
+
+  return (
+    <div>
+      <div className="mb-6 flex items-end justify-between">
+        <div>
+          <h1 className="font-serif text-3xl font-bold">{briefTitle}</h1>
+          <p className="mt-1 text-sm text-ink-soft">
+            {concepts.filter((c) => !c.discarded).length} concepts ·{" "}
+            {concepts.filter((c) => c.latest?.approved).length} approved by
+            self-critique
+          </p>
+        </div>
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-soft">
+          <input
+            type="checkbox"
+            checked={showDiscarded}
+            onChange={(e) => setShowDiscarded(e.target.checked)}
+          />
+          show discarded
+        </label>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {concepts.map((c) => (
+          <ConceptCard
+            key={c.id}
+            concept={c}
+            onOpen={() => onOpen(c.id)}
+            onCurate={async () => {
+              await (c.discarded ? api.restore(c.id) : api.discard(c.id));
+              load(showDiscarded);
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ConceptCard({
+  concept: c,
+  onOpen,
+  onCurate,
+}: {
+  concept: Concept;
+  onOpen: () => void;
+  onCurate: () => void;
+}) {
+  const archetypeName = c.archetype.split(":")[0];
+  return (
+    <div
+      className={`group overflow-hidden rounded-xl border border-ink/10 bg-paper shadow-sm transition hover:shadow-md ${
+        c.discarded ? "opacity-50" : ""
+      }`}
+    >
+      <button onClick={onOpen} className="block w-full">
+        <div className="flex aspect-[3/4] items-center justify-center bg-ink/5 p-3">
+          {c.latest?.has_proof ? (
+            <img
+              src={api.proofUrl(c.latest.id)}
+              alt={archetypeName}
+              className="max-h-full max-w-full rounded shadow"
+              loading="lazy"
+            />
+          ) : (
+            <span className="text-sm text-ink-soft">no proof</span>
+          )}
+        </div>
+      </button>
+      <div className="space-y-2 p-4">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="truncate font-semibold">{archetypeName}</h3>
+          <Cost usd={c.latest?.cost_usd} />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {c.latest && <ApprovalBadge approved={c.latest.approved} />}
+          {c.latest && <OriginBadge origin={c.latest.origin} />}
+          {c.latest && c.latest.warnings > 0 && (
+            <span className="text-xs text-amber-700">
+              {c.latest.warnings} warning(s)
+            </span>
+          )}
+          <button
+            onClick={onCurate}
+            className="ml-auto text-xs text-ink-soft underline-offset-2 hover:underline"
+          >
+            {c.discarded ? "restore" : "discard"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
