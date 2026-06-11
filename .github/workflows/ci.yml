@@ -30,4 +30,6 @@ jobs:
             xvfb-run -a scribus -g -ns -py service/scribus_scripts/export_pdf.py /tmp/doc.sla /tmp/out.pdf package
             test -s /tmp/out.pdf && echo "export ok: $(stat -c%s /tmp/out.pdf) bytes"
             python3 tests/check_separation.py /tmp/out.pdf CutContour
+            grep -aq "/GTS_PDFXVersion (PDF/X-4" /tmp/out.pdf && echo "PDF/X-4 marker ok"
+            grep -aq "/OutputIntent" /tmp/out.pdf && echo "output intent ok"
           '

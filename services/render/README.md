@@ -98,10 +98,13 @@ python3 tests/check_separation.py out.pdf CutContour             # RND-3 accepta
   `/Separation /CutContour` is now present and gated in CI. Note for tests:
   asserting "PDF contains a `/Separation`" is a **false pass** (crop marks
   always contribute `/Separation /All`) — use `tests/check_separation.py`.
-- **Formal PDF/X conformance — open.** `/package` currently emits PDF 1.5
-  with spots preserved; a PDF/X-3/X-4 conformance flag needs CMS + output
-  intent configured (`PDFX_VERSION` env hook exists). PitStop preflight of
-  the packaged PDF is the remaining M0 exit check.
+- **PDF/X conformance — done.** `/package` emits PDF/X-4 by default:
+  `GTS_PDFXVersion` marker, output intent (`ISO Coated v2 300% (basICColor)`,
+  bundled with Scribus), named spots intact. Env overrides: `PDFX_VERSION`
+  (10 = X-4, 11 = X-1a, 12 = X-3), `PDFX_PROFILE`, `PDFX_INFO`. All three X
+  levels verified to preserve the named separation. PitStop preflight of a
+  packaged PDF is the remaining M0 exit check (licensed production
+  environment).
 - **Per-request Scribus spawn (RND-4).** Measured in-container: ~0.5 s per
   headless export, ~0.6 s proof round trip over HTTP — already inside the
   2 s p95 budget, so the warm-process pool is an optimisation held in
