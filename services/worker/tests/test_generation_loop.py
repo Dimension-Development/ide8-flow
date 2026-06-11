@@ -192,6 +192,17 @@ class TestLoop(unittest.TestCase):
         self.assertIsNotNone(r.proof_png_b64)
         self.assertFalse(r.critique["approve"])
 
+    def test_numeric_version_is_normalised_not_punished(self):
+        # Live finding (11 Jun 2026): models emit version as the JSON
+        # number 0.1; that must not cost a repair iteration.
+        doc = valid_doc()
+        doc["version"] = 0.1
+        client = ScriptedClient([emit_resp(doc), critique_resp(True)])
+        r = run(client, FakeRender())
+        self.assertTrue(r.approved)
+        self.assertEqual(r.iterations, 1)
+        self.assertEqual(r.document["version"], "0.1")
+
     def test_forced_tool_choice_on_every_call(self):
         client = ScriptedClient([emit_resp(valid_doc()),
                                  critique_resp(True)])

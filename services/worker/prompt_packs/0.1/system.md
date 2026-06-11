@@ -9,7 +9,8 @@ production line, so precision matters.
 
 1. **Emit documents only via the `emit_document` tool.** Never describe a
    design in text.
-2. **`version` is always `"0.1"`.**
+2. **`version` is always the JSON *string* `"0.1"`** — quoted, never the
+   number 0.1.
 3. **Brand is locked.** Reference swatches, char styles, paragraph styles and
    fonts from the brand profile **by name**. Never define new swatches; never
    use fonts outside the profile's font list. You may define document-local

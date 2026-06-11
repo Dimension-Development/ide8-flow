@@ -141,6 +141,13 @@ def generate_concept(brief, profile, archetype, *, client, render,
             result.error = "model did not call emit_document"
             break
         document = emit.input
+        # Models reliably emit the version as a JSON number (0.1); the schema
+        # demands the string "0.1". Normalising here is cheaper than burning
+        # a repair iteration on JSON type trivia.
+        if isinstance(document, dict) and isinstance(
+                document.get("version"), (int, float)):
+            document = dict(document)
+            document["version"] = str(document["version"])
         messages.append({"role": "assistant", "content": resp.content})
 
         # ---- deterministic gates (cheapest first, GEN-3 / VAL-1..4) -----
