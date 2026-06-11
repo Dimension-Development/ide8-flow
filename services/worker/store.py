@@ -52,6 +52,16 @@ CREATE TABLE IF NOT EXISTS doc_version (
 );
 CREATE INDEX IF NOT EXISTS idx_version_concept
     ON doc_version (concept_id, created_at);
+CREATE TABLE IF NOT EXISTS job (
+    id TEXT PRIMARY KEY,
+    brief_json TEXT NOT NULL,
+    n INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued', 'running', 'done', 'failed')),
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at TEXT
+);
 CREATE TRIGGER IF NOT EXISTS doc_version_immutable
     BEFORE UPDATE ON doc_version
     BEGIN SELECT RAISE(ABORT, 'doc_version rows are immutable (GEN-6)'); END;
@@ -73,6 +83,10 @@ class DocStore:
         with closing(self._connect()) as db:
             db.executescript(SCHEMA_SQL)
             db.execute("PRAGMA journal_mode=WAL")  # persistent, set once
+            # lightweight migration: concept.job_id arrived with async jobs
+            cols = {r[1] for r in db.execute("PRAGMA table_info(concept)")}
+            if "job_id" not in cols:
+                db.execute("ALTER TABLE concept ADD COLUMN job_id TEXT")
             db.commit()
 
     def _connect(self):
@@ -84,14 +98,53 @@ class DocStore:
 
     # ---------------------------------------------------------- concepts
 
-    def create_concept(self, brief, archetype=""):
+    def create_concept(self, brief, archetype="", job_id=None):
         cid = uuid.uuid4().hex
         with closing(self._connect()) as db:
             db.execute(
-                "INSERT INTO concept (id, brief_json, archetype) VALUES (?,?,?)",
-                (cid, json.dumps(brief, sort_keys=True), archetype))
+                "INSERT INTO concept (id, brief_json, archetype, job_id)"
+                " VALUES (?,?,?,?)",
+                (cid, json.dumps(brief, sort_keys=True), archetype, job_id))
             db.commit()
         return cid
+
+    def concepts_for_job(self, job_id):
+        with closing(self._connect()) as db:
+            rows = db.execute(
+                "SELECT * FROM concept WHERE job_id = ? ORDER BY created_at",
+                (job_id,)).fetchall()
+        return [self._concept_row(r) for r in rows]
+
+    # ---------------------------------------------------------- jobs
+
+    def create_job(self, brief, n):
+        jid = uuid.uuid4().hex
+        with closing(self._connect()) as db:
+            db.execute(
+                "INSERT INTO job (id, brief_json, n) VALUES (?,?,?)",
+                (jid, json.dumps(brief, sort_keys=True), n))
+            db.commit()
+        return jid
+
+    def set_job_status(self, job_id, status, error=None, finished=False):
+        with closing(self._connect()) as db:
+            db.execute(
+                "UPDATE job SET status = ?, error = ?,"
+                " finished_at = CASE WHEN ? THEN datetime('now')"
+                " ELSE finished_at END WHERE id = ?",
+                (status, error, 1 if finished else 0, job_id))
+            db.commit()
+
+    def get_job(self, job_id):
+        with closing(self._connect()) as db:
+            row = db.execute(
+                "SELECT * FROM job WHERE id = ?", (job_id,)).fetchone()
+        if row is None:
+            return None
+        return {"id": row["id"], "brief": json.loads(row["brief_json"]),
+                "n": row["n"], "status": row["status"],
+                "error": row["error"], "created_at": row["created_at"],
+                "finished_at": row["finished_at"]}
 
     def list_concepts(self, include_discarded=False):
         sql = "SELECT * FROM concept"
@@ -122,6 +175,7 @@ class DocStore:
         return {"id": row["id"], "brief": json.loads(row["brief_json"]),
                 "archetype": row["archetype"],
                 "discarded": bool(row["discarded"]),
+                "job_id": row["job_id"] if "job_id" in row.keys() else None,
                 "created_at": row["created_at"]}
 
     # ---------------------------------------------------------- versions

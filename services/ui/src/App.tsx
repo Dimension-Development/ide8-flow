@@ -1,11 +1,16 @@
 import { useState } from "react";
 import ConceptGrid from "./components/ConceptGrid";
 import ConceptDetail from "./components/ConceptDetail";
+import BriefForm from "./components/BriefForm";
 
-type View = { kind: "grid" } | { kind: "concept"; id: string };
+type View =
+  | { kind: "grid" }
+  | { kind: "concept"; id: string }
+  | { kind: "brief" };
 
 export default function App() {
   const [view, setView] = useState<View>({ kind: "grid" });
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   return (
     <div className="min-h-screen">
@@ -20,11 +25,28 @@ export default function App() {
           <span className="text-sm text-ink-soft">
             proof grid — M2 internal preview
           </span>
+          <button
+            onClick={() => setView({ kind: "brief" })}
+            className="ml-auto rounded-lg bg-ink px-3 py-1.5 text-sm font-semibold text-cream transition hover:bg-ink-soft"
+          >
+            + New brief
+          </button>
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-6 py-8">
-        {view.kind === "grid" ? (
-          <ConceptGrid onOpen={(id) => setView({ kind: "concept", id })} />
+        {view.kind === "brief" ? (
+          <BriefForm
+            onStarted={(jobId) => {
+              setActiveJobId(jobId);
+              setView({ kind: "grid" });
+            }}
+          />
+        ) : view.kind === "grid" ? (
+          <ConceptGrid
+            activeJobId={activeJobId}
+            onJobSettled={() => setActiveJobId(null)}
+            onOpen={(id) => setView({ kind: "concept", id })}
+          />
         ) : (
           <ConceptDetail
             conceptId={view.id}

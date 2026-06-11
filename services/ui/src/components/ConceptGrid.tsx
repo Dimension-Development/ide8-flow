@@ -1,14 +1,19 @@
 import { useEffect, useState } from "react";
-import { api, type Concept } from "../api";
+import { api, type Concept, type Job } from "../api";
 import { ApprovalBadge, Cost, OriginBadge } from "./Badges";
 
 export default function ConceptGrid({
   onOpen,
+  activeJobId,
+  onJobSettled,
 }: {
   onOpen: (id: string) => void;
+  activeJobId: string | null;
+  onJobSettled: () => void;
 }) {
   const [concepts, setConcepts] = useState<Concept[] | null>(null);
   const [showDiscarded, setShowDiscarded] = useState(false);
+  const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = (incl: boolean) =>
@@ -20,6 +25,26 @@ export default function ConceptGrid({
   useEffect(() => {
     load(showDiscarded);
   }, [showDiscarded]);
+
+  // While a fan-out job runs, poll it and refresh the grid so concept
+  // cards appear as each one lands (BRF-1 live-fill UX).
+  useEffect(() => {
+    if (!activeJobId) return;
+    const tick = async () => {
+      try {
+        const j = await api.job(activeJobId);
+        setJob(j);
+        await load(showDiscarded);
+        if (j.status === "done" || j.status === "failed") onJobSettled();
+      } catch {
+        /* transient — keep polling */
+      }
+    };
+    tick();
+    const t = setInterval(tick, 4000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeJobId, showDiscarded]);
 
   if (error)
     return (
@@ -33,6 +58,26 @@ export default function ConceptGrid({
 
   return (
     <div>
+      {(activeJobId || job?.status === "failed") && (
+        <div
+          className={`mb-6 rounded-lg border p-3 text-sm ${
+            job?.status === "failed"
+              ? "border-brand/40 bg-brand/5 text-brand"
+              : "border-amber-300 bg-amber-50 text-amber-900"
+          }`}
+        >
+          {job?.status === "failed" ? (
+            <>Fan-out failed: {job.error}</>
+          ) : (
+            <>
+              <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+              Generating {job?.n ?? "…"} concepts — proofs appear below as
+              each one finishes (
+              {job?.concepts?.filter((c) => c.latest).length ?? 0} done)
+            </>
+          )}
+        </div>
+      )}
       <div className="mb-6 flex items-end justify-between">
         <div>
           <h1 className="font-serif text-3xl font-bold">{briefTitle}</h1>

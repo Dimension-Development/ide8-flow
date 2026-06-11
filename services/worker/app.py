@@ -14,6 +14,7 @@ gateway in M2 (PRD §9).
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Response
@@ -21,7 +22,7 @@ from fastapi import Body, FastAPI, HTTPException, Response
 WORKER_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(WORKER_ROOT))
 
-from brand import load_profile  # noqa: E402
+from brand import load_profile, merge_profile  # noqa: E402
 from generation import prompts  # noqa: E402
 from generation.loop import GenConfig  # noqa: E402
 from generation.render_client import RenderClient  # noqa: E402
@@ -73,40 +74,68 @@ def healthz():
     return {"ok": True}
 
 
+def _run_job(job_id, brief, n):
+    store, s = _gen_deps()
+    store.set_job_status(job_id, "running")
+    try:
+        generate_and_store(
+            brief, n=n, store=store, client=s["client"], render=s["render"],
+            pack=s["pack"], schema_json=s["schema_json"],
+            schema_path=SCHEMA_PATH, profile=s["profile"],
+            config=GenConfig(), job_id=job_id)
+        store.set_job_status(job_id, "done", finished=True)
+    except Exception as e:  # noqa: BLE001 — job must always reach a terminal state
+        store.set_job_status(job_id, "failed", error=str(e)[:2000],
+                             finished=True)
+
+
 @app.post("/generate")
 def generate(payload: dict = Body(...)):
+    """Async (BRF-1 UX): returns a job id immediately; concepts and versions
+    land in the store incrementally, so the grid fills as they finish."""
     brief = payload.get("brief")
     if not brief:
         raise HTTPException(400, "payload needs a 'brief' object")
-    n = int(payload.get("n", 6))
-    store, s = _gen_deps()
-    return generate_and_store(
-        brief, n=n, store=store, client=s["client"], render=s["render"],
-        pack=s["pack"], schema_json=s["schema_json"],
-        schema_path=SCHEMA_PATH, profile=s["profile"],
-        config=GenConfig())
+    n = max(1, min(int(payload.get("n", 6)), 8))
+    store, _ = _gen_deps()  # construct deps eagerly: fail in-request, not in-thread
+    job_id = store.create_job(brief, n)
+    threading.Thread(target=_run_job, args=(job_id, brief, n),
+                     daemon=True).start()
+    return {"job_id": job_id, "status": "queued", "n": n}
+
+
+@app.get("/jobs/{job_id}")
+def job_status(job_id: str):
+    store = _deps()
+    j = store.get_job(job_id)
+    if j is None:
+        raise HTTPException(404, "unknown job")
+    j["concepts"] = [
+        {**c, "latest": _latest_summary(store, c["id"])}
+        for c in store.concepts_for_job(job_id)]
+    return j
+
+
+def _latest_summary(store, concept_id):
+    latest = store.latest_version(concept_id)
+    if latest is None:
+        return None
+    return {
+        "id": latest["id"], "approved": latest["approved"],
+        "origin": latest["origin"], "has_proof": latest["has_proof"],
+        "created_at": latest["created_at"],
+        "validation_ok": latest["validation"].get("ok"),
+        "warnings": len(latest["validation"].get("warnings", [])),
+        "cost_usd": (latest["usage"] or {}).get("cost_usd"),
+    }
 
 
 @app.get("/concepts")
 def concepts(include_discarded: bool = False):
     store = _deps()
-    out = []
-    for c in store.list_concepts(include_discarded=include_discarded):
-        latest = store.latest_version(c["id"])
-        if latest is not None:
-            latest.pop("document", None)
-            c["latest"] = {
-                "id": latest["id"], "approved": latest["approved"],
-                "origin": latest["origin"], "has_proof": latest["has_proof"],
-                "created_at": latest["created_at"],
-                "validation_ok": latest["validation"].get("ok"),
-                "warnings": len(latest["validation"].get("warnings", [])),
-                "cost_usd": (latest["usage"] or {}).get("cost_usd"),
-            }
-        else:
-            c["latest"] = None
-        out.append(c)
-    return {"concepts": out}
+    return {"concepts": [
+        {**c, "latest": _latest_summary(store, c["id"])}
+        for c in store.list_concepts(include_discarded=include_discarded)]}
 
 
 @app.post("/concepts/{concept_id}/discard")
@@ -146,6 +175,34 @@ def proof(version_id: str):
     if png is None:
         raise HTTPException(404, "no proof for this version")
     return Response(content=png, media_type="image/png")
+
+
+@app.get("/versions/{version_id}/document.json")
+def download_document(version_id: str):
+    """EXP-1: the raw document JSON, pretty-printed for humans."""
+    v = _deps().get_version(version_id)
+    if v is None:
+        raise HTTPException(404, "unknown version")
+    return Response(
+        content=json.dumps(v["document"], indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition":
+                 f'attachment; filename="ide8-{version_id[:8]}.json"'})
+
+
+@app.get("/versions/{version_id}/document.sla")
+def download_sla(version_id: str):
+    """EXP-1: the escape hatch — compile this version (brand merged) to a
+    Scribus .sla a designer can open and finish by hand."""
+    store, s = _gen_deps()
+    v = store.get_version(version_id)
+    if v is None:
+        raise HTTPException(404, "unknown version")
+    sla = s["render"].compile(merge_profile(v["document"], s["profile"]))
+    return Response(
+        content=sla, media_type="application/vnd.scribus.sla+xml",
+        headers={"Content-Disposition":
+                 f'attachment; filename="ide8-{version_id[:8]}.sla"'})
 
 
 @app.post("/versions/{version_id}/mutate")

@@ -4,10 +4,12 @@
 
 | | |
 |---|---|
-| Version | 0.3 |
+| Version | 0.4 |
 | Date | 11 June 2026 |
 | Owner | Luke — Print Services Director, Dimension Development Ltd |
-| Status | In development. M0 (render service) complete; M1 (generation loop) underway |
+| Status | In development. M0 + M1 complete; M2 (internal MVP UI) in progress |
+
+**Changes in v0.4** — M1 exit criteria met (11 Jun 2026): brief JSON → 6 validated concepts with the full self-critique loop, fully via API; $1.56/brief total LLM spend (~$0.26/concept) against the £2 NFR; 2/6 self-critique-approved at iteration cap 4; GEN-5 escalation verified live (Opus closed both approvals); owner sign-off on rendered outputs · GEN-6/7 + VAL-7 live: immutable doc_version store (DB-trigger enforced) with full provenance and sha256 content hashes; NL mutation API returning before/after proof pair + structural diff · M2 begun: proof grid (REV-1) and concept detail with version timeline + mutation box (REV-2) shipped as internal preview; store concurrency hardened (WAL) after a live locked-database failure under UI read load.
 
 **Changes in v0.3** — M0 exit criteria met (11 Jun 2026): byte-identical recompile CI-gated; packaged PDF/X-4 with named `/Separation /CutContour` passed PitStop preflight first time + manual Illustrator review · §12 spot-separation risk closed — root cause was the PDF export output destination (screen → RGB conversion), not CMS prefs; fixed with printer output (`outdst=1`) · `/package` emits formal PDF/X-4 (output intent: bundled basICColor ISO Coated v2 300%; X-1a/X-3 selectable) · measured headless export ~0.5 s — RND-4 warm-process pool reclassified from expectation to optional optimisation.
 
@@ -221,7 +223,7 @@ Stack choices follow the established house pattern: FastAPI microservices in Doc
 | Milestone | Contents | Exit criteria |
 |---|---|---|
 | **M0 — Render service** (wks 1–2) | RND-1..4, RND-8; compiler hardening (incl. byte-stable compilation); spot-colour fix; golden-file CI | example.json → PDF/X with `/Separation /CutContour` (named, per RND-3), passing PitStop preflight; recompiling example.json is byte-identical (golden-file CI green) — **met 11 Jun 2026** (PitStop first-time pass + manual Illustrator review; CI green) |
-| **M1 — Generation loop** (wks 3–5) | GEN-1..7, VAL-1..4, VAL-6..7, BRAND-1..2, ADM-1..2 | Brief JSON → 6 validated concepts with self-critique loop, fully via API |
+| **M1 — Generation loop** (wks 3–5) | GEN-1..7, VAL-1..4, VAL-6..7, BRAND-1..2, ADM-1..2 | Brief JSON → 6 validated concepts with self-critique loop, fully via API — **met 11 Jun 2026** ($1.56/brief, owner sign-off; ADM-1 dashboards deferred to M2 UI — per-version cost metering live) |
 | **M2 — Internal MVP UI** (wks 6–9) | AUTH-1/3, BRF-1..2, REV-1..3, EXP-1, BRAND-3 | Alex's team runs a real brief end-to-end internally |
 | **M3 — Client review + handoff** (wks 10–14) | AUTH-2/4, REV-5..7/9, VAR-1..2, EXP-2..3, PRD-1..3, BRF-4 | A live client review and a released job through PitStop/Phoenix |
 | **M4 — Scale & craft** (ongoing) | Phase 3 items by demand | — |
@@ -259,3 +261,4 @@ JSON document → Python compiler (stdlib-only, donor-template architecture) →
 | 0.1 | 11 Jun 2026 | Initial draft (archived at `docs/archive/ide8flow-PRD-v0.1.md`) |
 | 0.2 | 11 Jun 2026 | See **Changes in v0.2** at top |
 | 0.3 | 11 Jun 2026 | M0 exit recorded; spot-separation risk closed; PDF/X-4 default; RND-4 measurements |
+| 0.4 | 11 Jun 2026 | M1 exit recorded (live costs, escalation verified); GEN-6/7 + VAL-7 live; M2 slice 1 shipped |

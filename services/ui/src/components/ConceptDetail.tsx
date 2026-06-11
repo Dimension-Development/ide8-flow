@@ -73,6 +73,18 @@ export default function ConceptDetail({
         </div>
 
         <aside className="space-y-6">
+          {selected && (
+            <div className="flex gap-2">
+              <DownloadLink href={api.slaUrl(selected.id)} label=".sla" />
+              <DownloadLink href={api.documentUrl(selected.id)} label=".json" />
+              {selected.has_proof && (
+                <DownloadLink
+                  href={api.proofUrl(selected.id)}
+                  label="proof.png"
+                />
+              )}
+            </div>
+          )}
           <MutateBox
             selected={selected}
             onDone={(m) => {
@@ -92,6 +104,19 @@ export default function ConceptDetail({
         </aside>
       </div>
     </div>
+  );
+}
+
+function DownloadLink({ href, label }: { href: string; label: string }) {
+  // EXP-1: the escape hatch — a designer is never blocked by the tool.
+  return (
+    <a
+      href={href}
+      download
+      className="flex-1 rounded-lg border border-ink/15 bg-paper px-3 py-2 text-center text-xs font-semibold text-ink transition hover:border-ink/40"
+    >
+      ↓ {label}
+    </a>
   );
 }
 

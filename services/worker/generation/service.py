@@ -17,12 +17,13 @@ SCHEMA_VERSION = "0.1"
 
 
 def generate_and_store(brief, *, n, store, client, render, pack,
-                       schema_json, schema_path, profile, config=None):
+                       schema_json, schema_path, profile, config=None,
+                       job_id=None):
     archetypes = pack["archetypes"]
 
     def run_one(i):
         archetype = archetypes[i % len(archetypes)]
-        concept_id = store.create_concept(brief, archetype)
+        concept_id = store.create_concept(brief, archetype, job_id=job_id)
         r = generate_concept(
             brief, profile, archetype, client=client, render=render,
             pack=pack, schema_json=schema_json, schema_path=schema_path,

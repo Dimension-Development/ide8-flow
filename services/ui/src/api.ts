@@ -55,7 +55,45 @@ async function j<T>(r: Response): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+export interface Brief {
+  title: string;
+  brand: string;
+  format: {
+    size: string;
+    orientation: string;
+    bleed: number;
+    margins: number[];
+  };
+  copy: {
+    headline: string;
+    subhead: string;
+    body: string[];
+    legal: string | null;
+  };
+  mandatoryElements: string[];
+  tone: string;
+  notes: string;
+}
+
+export interface Job {
+  id: string;
+  status: "queued" | "running" | "done" | "failed";
+  n: number;
+  error: string | null;
+  concepts: Concept[];
+}
+
 export const api = {
+  generate: (brief: Brief, n: number) =>
+    fetch("/api/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ brief, n }),
+    }).then((r) => j<{ job_id: string }>(r)),
+  job: (id: string) => fetch(`/api/jobs/${id}`).then((r) => j<Job>(r)),
+  slaUrl: (versionId: string) => `/api/versions/${versionId}/document.sla`,
+  documentUrl: (versionId: string) =>
+    `/api/versions/${versionId}/document.json`,
   concepts: (includeDiscarded: boolean) =>
     fetch(`/api/concepts?include_discarded=${includeDiscarded}`).then((r) =>
       j<{ concepts: Concept[] }>(r),

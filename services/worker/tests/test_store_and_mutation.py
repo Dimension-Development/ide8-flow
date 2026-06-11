@@ -125,6 +125,43 @@ class TestStore(unittest.TestCase):
         self.assertEqual(content_hash(a), content_hash(b))
 
 
+class TestJobs(unittest.TestCase):
+
+    def test_job_lifecycle_and_concept_linkage(self):
+        from generation.service import generate_and_store
+        from test_generation_loop import critique_resp
+
+        s = temp_store()
+        jid = s.create_job({"title": "t"}, 2)
+        self.assertEqual(s.get_job(jid)["status"], "queued")
+
+        s.set_job_status(jid, "running")
+        client = ScriptedClient([emit_resp(valid_doc()), critique_resp(True),
+                                 emit_resp(valid_doc()), critique_resp(True)])
+        summary = generate_and_store(
+            {"title": "t"}, n=2, store=s, client=client, render=FakeRender(),
+            pack=PACK, schema_json=SCHEMA_JSON, schema_path=SCHEMA_PATH,
+            profile=PROFILE, job_id=jid)
+        s.set_job_status(jid, "done", finished=True)
+
+        self.assertEqual(summary["approved"], 2)
+        linked = s.concepts_for_job(jid)
+        self.assertEqual(len(linked), 2)
+        self.assertTrue(all(c["job_id"] == jid for c in linked))
+        j = s.get_job(jid)
+        self.assertEqual(j["status"], "done")
+        self.assertIsNotNone(j["finished_at"])
+
+    def test_failed_job_records_error(self):
+        s = temp_store()
+        jid = s.create_job({}, 1)
+        s.set_job_status(jid, "failed", error="render service down",
+                         finished=True)
+        j = s.get_job(jid)
+        self.assertEqual(j["status"], "failed")
+        self.assertIn("render", j["error"])
+
+
 class TestDiff(unittest.TestCase):
 
     def test_diff_paths(self):
