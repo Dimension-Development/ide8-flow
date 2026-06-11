@@ -55,11 +55,52 @@ class TestStore(unittest.TestCase):
         vid = s.add_version(
             cid, valid_doc(), schema_version="0.1", prompt_pack="0.1",
             validation={"ok": True})
+        db = s._connect()
         with self.assertRaises(sqlite3.DatabaseError):
-            s._db.execute(
+            db.execute(
                 "UPDATE doc_version SET approved = 1 WHERE id = ?", (vid,))
         with self.assertRaises(sqlite3.DatabaseError):
-            s._db.execute("DELETE FROM doc_version WHERE id = ?", (vid,))
+            db.execute("DELETE FROM doc_version WHERE id = ?", (vid,))
+        db.close()
+
+    def test_concurrent_readers_and_writers_do_not_lock(self):
+        # Regression for the live 11 Jun 2026 failure: a mutation commit
+        # raised "database is locked" while the UI streamed proofs.
+        import threading
+
+        s = temp_store()
+        cid = s.create_concept({}, "")
+        first = s.add_version(cid, valid_doc(), schema_version="0.1",
+                              prompt_pack="0.1", validation={"ok": True},
+                              proof_png=b"P" * 50_000)
+        errors = []
+
+        def writer():
+            try:
+                for _ in range(10):
+                    s.add_version(cid, valid_doc(), schema_version="0.1",
+                                  prompt_pack="0.1", validation={"ok": True},
+                                  proof_png=b"P" * 50_000)
+            except Exception as e:  # noqa: BLE001
+                errors.append(e)
+
+        def reader():
+            try:
+                for _ in range(50):
+                    s.get_proof(first)
+                    s.list_versions(cid)
+                    s.list_concepts()
+            except Exception as e:  # noqa: BLE001
+                errors.append(e)
+
+        threads = ([threading.Thread(target=writer) for _ in range(4)]
+                   + [threading.Thread(target=reader) for _ in range(4)])
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(len(s.list_versions(cid)), 41)
 
     def test_version_chain(self):
         s = temp_store()
