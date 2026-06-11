@@ -11,3 +11,7 @@ __pycache__/
 
 # local compiler output (committed golden fixtures live under tests/golden/)
 services/render/out.*
+
+# worker local store + generation output
+services/worker/data/
+out/

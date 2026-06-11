@@ -1,0 +1,143 @@
+"""Store immutability/provenance (GEN-6, VAL-7) + mutation loop (GEN-7)."""
+
+import json
+import sqlite3
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+WORKER_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = WORKER_ROOT.parents[1]
+sys.path.insert(0, str(WORKER_ROOT))
+
+from brand import load_profile  # noqa: E402
+from generation import prompts  # noqa: E402
+from generation.mutation import doc_diff, mutate_document  # noqa: E402
+from store import DocStore, content_hash  # noqa: E402
+
+from test_generation_loop import (  # noqa: E402
+    FakeRender, ScriptedClient, emit_resp, valid_doc, invalid_doc)
+
+SCHEMA_PATH = str(REPO_ROOT / "schema" / "document-0.1.schema.json")
+SCHEMA_JSON = json.loads(Path(SCHEMA_PATH).read_text())
+PROFILE = load_profile(WORKER_ROOT / "examples" / "brand_profile.json")
+PACK = prompts.load_pack("0.1")
+PACK["exemplar"] = {}
+
+
+def temp_store():
+    return DocStore(Path(tempfile.mkdtemp()) / "test.db")
+
+
+class TestStore(unittest.TestCase):
+
+    def test_roundtrip_with_provenance(self):
+        s = temp_store()
+        cid = s.create_concept({"title": "t"}, "Hero split")
+        vid = s.add_version(
+            cid, valid_doc(), schema_version="0.1", prompt_pack="0.1",
+            validation={"ok": True, "errors": [], "warnings": []},
+            model_history=["claude-sonnet-4-6"], approved=True,
+            proof_png=b"PNGBYTES")
+        v = s.get_version(vid)
+        self.assertEqual(v["concept_id"], cid)
+        self.assertEqual(v["schema_version"], "0.1")
+        self.assertTrue(v["approved"])
+        self.assertTrue(v["has_proof"])
+        self.assertEqual(v["content_hash"], content_hash(valid_doc()))
+        self.assertEqual(s.get_proof(vid), b"PNGBYTES")
+        self.assertEqual(v["document"]["version"], "0.1")
+
+    def test_versions_are_immutable_in_the_database(self):
+        s = temp_store()
+        cid = s.create_concept({}, "")
+        vid = s.add_version(
+            cid, valid_doc(), schema_version="0.1", prompt_pack="0.1",
+            validation={"ok": True})
+        with self.assertRaises(sqlite3.DatabaseError):
+            s._db.execute(
+                "UPDATE doc_version SET approved = 1 WHERE id = ?", (vid,))
+        with self.assertRaises(sqlite3.DatabaseError):
+            s._db.execute("DELETE FROM doc_version WHERE id = ?", (vid,))
+
+    def test_version_chain(self):
+        s = temp_store()
+        cid = s.create_concept({}, "")
+        v1 = s.add_version(cid, valid_doc(), schema_version="0.1",
+                           prompt_pack="0.1", validation={"ok": True})
+        doc2 = valid_doc()
+        doc2["meta"] = {"title": "v2"}
+        v2 = s.add_version(cid, doc2, schema_version="0.1",
+                           prompt_pack="0.1", validation={"ok": True},
+                           origin="mutation", parent_version_id=v1,
+                           mutation_instruction="add a title")
+        chain = s.list_versions(cid)
+        self.assertEqual([c["id"] for c in chain], [v1, v2])
+        self.assertEqual(chain[1]["parent_version_id"], v1)
+        self.assertEqual(chain[1]["origin"], "mutation")
+        self.assertEqual(s.latest_version(cid)["id"], v2)
+
+    def test_content_hash_is_canonical(self):
+        a = {"b": 1, "a": [1, 2]}
+        b = {"a": [1, 2], "b": 1}
+        self.assertEqual(content_hash(a), content_hash(b))
+
+
+class TestDiff(unittest.TestCase):
+
+    def test_diff_paths(self):
+        old = valid_doc()
+        new = valid_doc()
+        new["charStyles"][0]["size"] = 60
+        new["pages"][0]["items"].append(
+            {"type": "shape", "name": "band", "frame": [0, 700, 595, 100],
+             "fill": "BrandRed"})
+        changes = doc_diff(old, new)
+        paths = {c["path"]: c["change"] for c in changes}
+        self.assertEqual(paths.get("charStyles[0].size"), "changed")
+        self.assertEqual(paths.get("pages[0].items[1]"), "added")
+
+    def test_identical_documents_diff_empty(self):
+        self.assertEqual(doc_diff(valid_doc(), valid_doc()), [])
+
+
+class TestMutation(unittest.TestCase):
+
+    def run_mutation(self, client, render=None, instruction="bigger headline"):
+        return mutate_document(
+            valid_doc(), instruction, PROFILE, client=client,
+            render=render or FakeRender(), pack=PACK,
+            schema_json=SCHEMA_JSON, schema_path=SCHEMA_PATH)
+
+    def test_successful_mutation_produces_diff(self):
+        revised = valid_doc()
+        revised["charStyles"][0]["size"] = 64
+        client = ScriptedClient([emit_resp(revised)])
+        r = self.run_mutation(client)
+        self.assertIsNotNone(r.document)
+        self.assertEqual(r.iterations, 1)
+        self.assertIn("charStyles[0].size",
+                      [c["path"] for c in r.diff])
+        self.assertIsNotNone(r.proof_png_b64)
+
+    def test_mutation_repairs_and_escalates_immediately(self):
+        revised = valid_doc()
+        revised["charStyles"][0]["size"] = 64
+        client = ScriptedClient([emit_resp(invalid_doc()),
+                                 emit_resp(revised)])
+        r = self.run_mutation(client)
+        self.assertIsNotNone(r.document)
+        self.assertEqual(r.iterations, 2)
+        # mutations escalate to the strong model on first failure
+        self.assertNotEqual(client.calls[0]["model"], client.calls[1]["model"])
+
+    def test_mutation_failure_reports_error(self):
+        client = ScriptedClient([emit_resp(invalid_doc())] * 3)
+        r = self.run_mutation(client)
+        self.assertIsNone(r.document)
+        self.assertIsNotNone(r.error)
+
+
+if __name__ == "__main__":
+    unittest.main()
