@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
 """
-sla_compiler.py — compile a clean JSON document schema to a Scribus .sla file.
+sla_compiler.py — compile an ide8.flow document (JSON) to a Scribus .sla file.
 
-Pipeline:  schema.json  →  sla_compiler  →  doc.sla  →  headless Scribus  →  PDF proof / PDF/X
+Pipeline:  document.json  →  sla_compiler  →  doc.sla  →  headless Scribus  →  PDF proof / PDF/X
 
 Design notes
 ------------
-- All schema coordinates are PAGE-RELATIVE points (1pt = 1/72"). The compiler
+- All document coordinates are PAGE-RELATIVE points (1pt = 1/72"). The compiler
   translates to Scribus "scratch space": page n sits at
   (SCRATCH_X, SCRATCH_Y + n * (pageH + V_GAP)).
+- Byte-stable (PRD RND-2): identical document + compiler + donor template
+  produces a byte-identical SLA. Item IDs are allocated sequentially in
+  document order — never random. All serialization goes through
+  compile_to_bytes() so CLI, tests, and the render service emit identically.
+- Validation is structural and collects ALL errors before failing
+  (CompileError.errors: [{code, path, message}]), so generation repair loops
+  (PRD GEN-3) see the whole picture in one round trip. The full VAL layer
+  (brand conformance, geometry, contrast) is M1 and lives above this.
 - A donor template.sla (empty doc saved by the target Scribus version) supplies
   the ~170 DOCUMENT preference attributes and required boilerplate children
-  (CheckProfile, Printer, PDF, LAYERS, PageSets, ...). We never hand-author those.
+  (CheckProfile, Printer, PDF, LAYERS, PageSets, ...). We never hand-author
+  those. Missing anchors raise DonorError → regenerate the donor.
 - Per-PTYPE attribute defaults were harvested from real Scribus-saved objects,
   so every required attribute is present; the compiler only overrides the
   meaningful ones.
@@ -19,20 +28,26 @@ Design notes
   Scribus 1.5+ stores natively.
 
 Usage:
-    python3 sla_compiler.py schema.json out.sla [--template template.sla]
+    python3 sla_compiler.py document.json out.sla [--template template.sla] [--errors-json]
 """
 
+import argparse
+import io
+import itertools
 import json
-import random
 import sys
 import xml.etree.ElementTree as ET
-from copy import deepcopy
+from pathlib import Path
 
 # ---------------------------------------------------------------- constants
+
+SUPPORTED_VERSIONS = {"0.1"}
 
 SCRATCH_X = 100.0   # where Scribus places page x in scratch space
 SCRATCH_Y = 20.0    # first page y
 V_GAP = 40.0        # vertical gap between stacked pages
+
+ITEM_ID_BASE = 100_000_001   # sequential, document order — byte-stable output
 
 PAGE_SIZES = {      # points, portrait
     "A0": (2384, 3370), "A1": (1684, 2384), "A2": (1191, 1684),
@@ -41,6 +56,8 @@ PAGE_SIZES = {      # points, portrait
 }
 
 ALIGN = {"left": "0", "center": "1", "right": "2", "justify": "3", "force": "4"}
+
+ITEM_TYPES = {"text": "4", "shape": "6", "path": "7", "image": "2"}
 
 # Per-PTYPE attribute defaults harvested from Scribus 1.6.1-saved objects.
 # Only attributes NOT overridden per-item need to be correct here.
@@ -94,6 +111,23 @@ OBJ_DEFAULTS = {
 }
 
 
+# ---------------------------------------------------------------- errors
+
+class CompileError(Exception):
+    """Structural errors in the document. `errors` is machine-readable:
+    [{code, path, message}] — the contract the GEN-3 repair loop consumes."""
+
+    def __init__(self, errors):
+        self.errors = errors
+        super().__init__("; ".join(
+            f"[{e['code']}] {e['path']}: {e['message']}" for e in errors))
+
+
+class DonorError(Exception):
+    """The donor template is unusable. Regenerate it: save an empty document
+    from the pinned Scribus version, replace template.sla (see README)."""
+
+
 # ---------------------------------------------------------------- helpers
 
 def f(v):
@@ -106,10 +140,6 @@ def rect_path(w, h):
     return f"M0 0 L{f(w)} 0 L{f(w)} {f(h)} L0 {f(h)} L0 0 Z"
 
 
-def new_item_id():
-    return str(random.randint(10_000_000, 999_999_999))
-
-
 def page_size(page_spec):
     size = page_spec.get("size", "A4")
     if isinstance(size, (list, tuple)):
@@ -119,6 +149,153 @@ def page_size(page_spec):
     if page_spec.get("orientation", "portrait") == "landscape" and h > w:
         w, h = h, w
     return w, h
+
+
+def _is_frame(v):
+    return (isinstance(v, (list, tuple)) and len(v) == 4
+            and all(isinstance(n, (int, float)) for n in v))
+
+
+# ---------------------------------------------------------------- validation
+
+def validate_document(document, donor_colors, donor_charstyles, donor_parastyles):
+    """Structural validation. Returns ALL errors, not just the first."""
+    errors = []
+
+    def err(code, path, message):
+        errors.append({"code": code, "path": path, "message": message})
+
+    version = document.get("version")
+    if version is None:
+        err("missing-field", "version",
+            f"required; supported document-schema versions: {sorted(SUPPORTED_VERSIONS)}")
+    elif version not in SUPPORTED_VERSIONS:
+        err("unsupported-version", "version",
+            f'"{version}" not in supported versions {sorted(SUPPORTED_VERSIONS)}')
+
+    page = document.get("page", {})
+    size = page.get("size", "A4")
+    if isinstance(size, str):
+        if size.upper() not in PAGE_SIZES:
+            err("unknown-page-size", "page.size",
+                f'"{size}" — named sizes: {sorted(PAGE_SIZES)} (or [w, h] in points)')
+    elif not (isinstance(size, (list, tuple)) and len(size) == 2):
+        err("bad-page-size", "page.size", "must be a named size or [w, h] in points")
+    if page.get("orientation", "portrait") not in ("portrait", "landscape"):
+        err("bad-orientation", "page.orientation", 'must be "portrait" or "landscape"')
+    margins = page.get("margins", [10, 10, 10, 10])
+    if not (isinstance(margins, (list, tuple)) and len(margins) == 4):
+        err("bad-margins", "page.margins", "must be [left, right, top, bottom]")
+
+    swatch_names = set()
+    for i, sw in enumerate(document.get("swatches", [])):
+        p = f"swatches[{i}]"
+        name = sw.get("name")
+        if not name:
+            err("missing-field", f"{p}.name", "swatch needs a name")
+            continue
+        swatch_names.add(name)
+        space = sw.get("space", "cmyk").lower()
+        vals = sw.get("values", [])
+        want = {"cmyk": 4, "rgb": 3}.get(space)
+        if want is None:
+            err("bad-swatch", f"{p}.space", f'"{space}" — must be "cmyk" or "rgb"')
+        elif len(vals) != want:
+            err("bad-swatch", f"{p}.values",
+                f"{space} needs {want} values, got {len(vals)}")
+
+    # "None" is the Scribus no-colour; the donor supplies Black/White/etc.
+    known_colors = donor_colors | swatch_names | {"None"}
+
+    char_names = set(donor_charstyles) | {"Default Character Style"}
+    for i, st in enumerate(document.get("charStyles", [])):
+        p = f"charStyles[{i}]"
+        if not st.get("name"):
+            err("missing-field", f"{p}.name", "char style needs a name")
+        else:
+            char_names.add(st["name"])
+        if not st.get("font"):
+            err("missing-field", f"{p}.font", "char style needs a font")
+        color = st.get("color", "Black")
+        if color not in known_colors:
+            err("unknown-swatch", f"{p}.color", f'"{color}" is not a defined swatch')
+
+    para_names = set(donor_parastyles) | {"Default Paragraph Style"}
+    for i, st in enumerate(document.get("paraStyles", [])):
+        p = f"paraStyles[{i}]"
+        if not st.get("name"):
+            err("missing-field", f"{p}.name", "paragraph style needs a name")
+        else:
+            para_names.add(st["name"])
+        align = st.get("align", "left")
+        if align not in ALIGN:
+            err("bad-align", f"{p}.align", f'"{align}" — must be one of {sorted(ALIGN)}')
+        cs = st.get("charStyle")
+        if cs and cs not in char_names:
+            err("unknown-style", f"{p}.charStyle", f'"{cs}" is not a defined char style')
+
+    for n, pg in enumerate(document.get("pages", [])):
+        for j, item in enumerate(pg.get("items", [])):
+            p = f"pages[{n}].items[{j}]"
+            kind = item.get("type")
+            if kind not in ITEM_TYPES:
+                err("unknown-item-type", f"{p}.type",
+                    f'"{kind}" — must be one of {sorted(ITEM_TYPES)}')
+                continue
+            if not _is_frame(item.get("frame")):
+                err("bad-frame", f"{p}.frame", "must be [x, y, w, h] in points")
+
+            fill = item.get("fill")
+            if fill and fill not in known_colors:
+                err("unknown-swatch", f"{p}.fill", f'"{fill}" is not a defined swatch')
+            stroke = item.get("stroke")
+            if stroke:
+                sc = stroke.get("color", "Black")
+                if sc not in known_colors:
+                    err("unknown-swatch", f"{p}.stroke.color",
+                        f'"{sc}" is not a defined swatch')
+
+            if kind == "path":
+                if not item.get("d"):
+                    err("missing-field", f"{p}.d", "path needs SVG path data")
+                if not stroke:
+                    err("missing-field", f"{p}.stroke", "path needs a stroke")
+                if fill:
+                    err("invalid-fill", f"{p}.fill",
+                        "paths are stroke-only — no fill (cut/crease paths, VAL-3)")
+
+            elif kind == "text":
+                paragraphs = item.get("paragraphs")
+                if not paragraphs:
+                    err("empty-paragraphs", f"{p}.paragraphs",
+                        "text frame needs at least one paragraph")
+                    continue
+                for k, para in enumerate(paragraphs):
+                    pp = f"{p}.paragraphs[{k}]"
+                    style = para.get("style")
+                    if not style:
+                        err("missing-field", f"{pp}.style", "paragraph needs a style")
+                    elif style not in para_names:
+                        err("unknown-style", f"{pp}.style",
+                            f'"{style}" is not a defined paragraph style')
+                    runs = para.get("runs")
+                    if runs is None and "text" not in para:
+                        err("missing-field", f"{pp}.text",
+                            'paragraph needs "text" or "runs"')
+                    for r, run in enumerate(runs or []):
+                        if "text" not in run:
+                            err("missing-field", f"{pp}.runs[{r}].text",
+                                "run needs text")
+                        rcs = run.get("charStyle")
+                        if rcs and rcs not in char_names:
+                            err("unknown-style", f"{pp}.runs[{r}].charStyle",
+                                f'"{rcs}" is not a defined char style')
+
+            elif kind == "image":
+                if not item.get("src"):
+                    err("missing-field", f"{p}.src", "image needs a source path")
+
+    return errors
 
 
 # ---------------------------------------------------------------- emitters
@@ -234,14 +411,13 @@ def emit_story(po_el, paragraphs):
         ET.SubElement(story, tag, {"PARENT": style})
 
 
-def emit_item(doc_el, item, page_no, page_pos):
+def emit_item(doc_el, item, item_id, page_no, page_pos):
     px, py = page_pos
     x, y, w, h = item["frame"]
     kind = item["type"]
-    ptype = {"text": "4", "shape": "6", "path": "7", "image": "2"}[kind]
-    attrs = dict(OBJ_DEFAULTS[ptype])
+    attrs = dict(OBJ_DEFAULTS[ITEM_TYPES[kind]])
     attrs.update({
-        "ItemID": new_item_id(),
+        "ItemID": str(item_id),
         "OwnPage": str(page_no),
         "ANNAME": item.get("name", ""),
         "XPOS": f(px + x), "YPOS": f(py + y),
@@ -282,16 +458,42 @@ def emit_item(doc_el, item, page_no, page_pos):
 
 # ---------------------------------------------------------------- compile
 
-def compile_sla(schema, template_path):
-    tree = ET.parse(template_path)
-    root = tree.getroot()
-    doc = root.find("DOCUMENT")
+def _donor_doc(template_path):
+    """Parse the donor and assert the anchors the emitters rely on."""
+    try:
+        tree = ET.parse(template_path)
+    except (OSError, ET.ParseError) as e:
+        raise DonorError(f"cannot read donor template {template_path}: {e}")
+    doc = tree.getroot().find("DOCUMENT")
+    if doc is None:
+        raise DonorError(f"{template_path} has no DOCUMENT element")
+    missing = [tag for tag in ("COLOR", "CHARSTYLE", "STYLE", "MASTERPAGE")
+               if not doc.findall(tag)]
+    if missing:
+        raise DonorError(
+            f"{template_path} is missing required anchors {missing} — "
+            "regenerate the donor: save an empty document from the pinned "
+            "Scribus version (see README)")
+    return tree, doc
 
-    page = schema.get("page", {})
+
+def compile_sla(document, template_path):
+    tree, doc = _donor_doc(template_path)
+
+    errors = validate_document(
+        document,
+        donor_colors={c.get("NAME") for c in doc.findall("COLOR")},
+        donor_charstyles={c.get("CNAME") for c in doc.findall("CHARSTYLE")},
+        donor_parastyles={s.get("NAME") for s in doc.findall("STYLE")},
+    )
+    if errors:
+        raise CompileError(errors)
+
+    page = document.get("page", {})
     w, h = page_size(page)
     m = page.get("margins", [10, 10, 10, 10])  # L R T B
     bleed = page.get("bleed", 0)
-    pages = schema.get("pages", [])
+    pages = document.get("pages", [])
 
     doc.set("ANZPAGES", str(len(pages)))
     doc.set("PAGEWIDTH", f(w))
@@ -302,39 +504,72 @@ def compile_sla(schema, template_path):
     doc.set("BORDERRIGHT", f(m[1]))
     doc.set("BORDERTOP", f(m[2]))
     doc.set("BORDERBOTTOM", f(m[3]))
-    if "title" in schema.get("meta", {}):
-        doc.set("TITLE", schema["meta"]["title"])
+    if "title" in document.get("meta", {}):
+        doc.set("TITLE", document["meta"]["title"])
 
-    emit_colors(doc, schema.get("swatches", []))
-    emit_char_styles(doc, schema.get("charStyles", []))
-    emit_para_styles(doc, schema.get("paraStyles", []))
+    emit_colors(doc, document.get("swatches", []))
+    emit_char_styles(doc, document.get("charStyles", []))
+    emit_para_styles(doc, document.get("paraStyles", []))
     positions = emit_pages(doc, len(pages), w, h, m)
 
     # drop any donor page objects
     for po in doc.findall("PAGEOBJECT"):
         doc.remove(po)
 
+    ids = itertools.count(ITEM_ID_BASE)
     for n, pg in enumerate(pages):
         for item in pg.get("items", []):
-            emit_item(doc, item, n, positions[n])
+            emit_item(doc, item, next(ids), n, positions[n])
 
     return tree
 
 
-def main():
-    if len(sys.argv) < 3:
-        print(__doc__)
-        sys.exit(1)
-    schema_path, out_path = sys.argv[1], sys.argv[2]
-    template = "template.sla"
-    if "--template" in sys.argv:
-        template = sys.argv[sys.argv.index("--template") + 1]
-    schema = json.load(open(schema_path))
-    tree = compile_sla(schema, template)
+def compile_to_bytes(document, template_path):
+    """The single serialization path — CLI, tests, and the render service all
+    emit through here, which is what makes byte-stability a testable claim."""
+    tree = compile_sla(document, template_path)
     ET.indent(tree, space=" ")
-    tree.write(out_path, encoding="UTF-8", xml_declaration=True)
-    print(f"compiled {schema_path} -> {out_path}")
+    buf = io.BytesIO()
+    tree.write(buf, encoding="UTF-8", xml_declaration=True)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------- CLI
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Compile an ide8.flow document (JSON) to a Scribus .sla")
+    parser.add_argument("document", help="document JSON path")
+    parser.add_argument("out", help="output .sla path")
+    parser.add_argument("--template",
+                        default=str(Path(__file__).with_name("template.sla")),
+                        help="donor template (default: template.sla beside the compiler)")
+    parser.add_argument("--errors-json", action="store_true",
+                        help="on validation failure, print {ok, errors} JSON to stdout")
+    args = parser.parse_args(argv)
+
+    with open(args.document) as fh:
+        document = json.load(fh)
+
+    try:
+        data = compile_to_bytes(document, args.template)
+    except CompileError as e:
+        if args.errors_json:
+            json.dump({"ok": False, "errors": e.errors}, sys.stdout, indent=2)
+            print()
+        else:
+            for err in e.errors:
+                print(f"error[{err['code']}] {err['path']}: {err['message']}",
+                      file=sys.stderr)
+        return 2
+    except DonorError as e:
+        print(f"donor error: {e}", file=sys.stderr)
+        return 3
+
+    Path(args.out).write_bytes(data)
+    print(f"compiled {args.document} -> {args.out}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
