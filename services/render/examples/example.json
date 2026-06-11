@@ -1,0 +1,244 @@
+{
+  "version": "0.1",
+  "meta": {
+    "title": "Summer Gondola End \u2014 Header Card"
+  },
+  "page": {
+    "size": "A4",
+    "orientation": "portrait",
+    "margins": [
+      12,
+      12,
+      12,
+      12
+    ],
+    "bleed": 8.5
+  },
+  "swatches": [
+    {
+      "name": "BrandRed",
+      "space": "cmyk",
+      "values": [
+        0,
+        90,
+        78,
+        8
+      ]
+    },
+    {
+      "name": "DeepInk",
+      "space": "cmyk",
+      "values": [
+        80,
+        60,
+        0,
+        70
+      ]
+    },
+    {
+      "name": "Cream",
+      "space": "cmyk",
+      "values": [
+        0,
+        4,
+        12,
+        0
+      ]
+    },
+    {
+      "name": "CutContour",
+      "space": "cmyk",
+      "values": [
+        0,
+        100,
+        0,
+        0
+      ],
+      "spot": true
+    }
+  ],
+  "charStyles": [
+    {
+      "name": "HeadChar",
+      "font": "Liberation Sans Bold",
+      "size": 48,
+      "color": "Cream"
+    },
+    {
+      "name": "SubChar",
+      "font": "Liberation Sans Bold",
+      "size": 18,
+      "color": "Cream"
+    },
+    {
+      "name": "BodyChar",
+      "font": "Liberation Sans Regular",
+      "size": 11,
+      "color": "DeepInk"
+    },
+    {
+      "name": "EmphChar",
+      "font": "Liberation Sans Bold",
+      "size": 18,
+      "color": "DeepInk"
+    }
+  ],
+  "paraStyles": [
+    {
+      "name": "Headline",
+      "charStyle": "HeadChar",
+      "align": "center",
+      "lineHeight": 52
+    },
+    {
+      "name": "Subhead",
+      "charStyle": "SubChar",
+      "align": "center",
+      "lineHeight": 22,
+      "spaceBefore": 6
+    },
+    {
+      "name": "Body",
+      "charStyle": "BodyChar",
+      "align": "left",
+      "lineHeight": 15,
+      "spaceAfter": 8
+    }
+  ],
+  "pages": [
+    {
+      "items": [
+        {
+          "type": "shape",
+          "name": "bg-panel",
+          "frame": [
+            -8.5,
+            -8.5,
+            612,
+            300
+          ],
+          "fill": "BrandRed"
+        },
+        {
+          "type": "text",
+          "name": "headline",
+          "frame": [
+            40,
+            80,
+            515,
+            120
+          ],
+          "paragraphs": [
+            {
+              "style": "Headline",
+              "text": "SUMMER JUST LANDED"
+            },
+            {
+              "style": "Subhead",
+              "runs": [
+                {
+                  "text": "Fresh picks for the season \u2014 "
+                },
+                {
+                  "text": "aisle 4",
+                  "charStyle": "EmphChar"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "name": "body-copy",
+          "frame": [
+            60,
+            340,
+            475,
+            200
+          ],
+          "columns": 2,
+          "columnGap": 18,
+          "paragraphs": [
+            {
+              "style": "Body",
+              "text": "Printed on FSC-certified board with UV-cured inks for vivid, durable colour that holds up under store lighting."
+            },
+            {
+              "style": "Body",
+              "text": "This header card is part of the modular gondola-end kit. Pair with matching shelf strips and aisle fins for full-bay impact."
+            }
+          ]
+        },
+        {
+          "type": "path",
+          "name": "cutpath-tab",
+          "frame": [
+            180,
+            560,
+            235,
+            120
+          ],
+          "d": "M0 120 L0 30 C0 10 10 0 30 0 L205 0 C225 0 235 10 235 30 L235 120",
+          "stroke": {
+            "color": "CutContour",
+            "width": 0.5
+          }
+        }
+      ]
+    },
+    {
+      "items": [
+        {
+          "type": "shape",
+          "name": "footer-band",
+          "frame": [
+            -8.5,
+            700,
+            612,
+            150.5
+          ],
+          "fill": "DeepInk"
+        },
+        {
+          "type": "text",
+          "name": "spec-notes",
+          "frame": [
+            60,
+            60,
+            475,
+            300
+          ],
+          "paragraphs": [
+            {
+              "style": "Subhead",
+              "text": "PRODUCTION SPEC"
+            },
+            {
+              "style": "Body",
+              "text": "Substrate: 3mm display board. Print: UV flatbed, CMYK + spot CutContour for the shaped tab. Finish: matt laminate."
+            },
+            {
+              "style": "Body",
+              "text": "Cut path runs as a named spot separation and must not knock out underlying artwork."
+            }
+          ]
+        },
+        {
+          "type": "shape",
+          "name": "swatch-chip",
+          "frame": [
+            60,
+            400,
+            80,
+            80
+          ],
+          "fill": "BrandRed",
+          "stroke": {
+            "color": "DeepInk",
+            "width": 2
+          }
+        }
+      ]
+    }
+  ]
+}

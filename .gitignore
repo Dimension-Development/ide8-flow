@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# Claude Code local (personal) settings
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# local compiler output (committed golden fixtures live under tests/golden/)
+services/render/out.*
