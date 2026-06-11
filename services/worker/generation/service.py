@@ -2,6 +2,7 @@
 and the worker API so there is exactly one code path from brief to stored
 versions."""
 
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -24,10 +25,18 @@ def generate_and_store(brief, *, n, store, client, render, pack,
     def run_one(i):
         archetype = archetypes[i % len(archetypes)]
         concept_id = store.create_concept(brief, archetype, job_id=job_id)
-        r = generate_concept(
-            brief, profile, archetype, client=client, render=render,
-            pack=pack, schema_json=schema_json, schema_path=schema_path,
-            config=config)
+        try:
+            r = generate_concept(
+                brief, profile, archetype, client=client, render=render,
+                pack=pack, schema_json=schema_json, schema_path=schema_path,
+                config=config)
+        except Exception as e:  # noqa: BLE001 — one concept must not kill the job
+            return {
+                "concept_id": concept_id, "version_id": None,
+                "archetype": archetype, "approved": False,
+                "iterations": 0, "cost_usd": 0.0,
+                "error": f"{type(e).__name__}: {e}"[:500],
+            }
         version_id = None
         if r.document is not None:
             import base64
@@ -53,7 +62,11 @@ def generate_and_store(brief, *, n, store, client, render, pack,
             "error": r.error,
         }
 
-    with ThreadPoolExecutor(max_workers=max(1, n)) as pool:
+    # Throttled fan-out: low usage tiers (8k OTPM) can't absorb 6-8 parallel
+    # generations. 3 concurrent stays under Tier-1 limits with 8k max_tokens;
+    # raise FANOUT_CONCURRENCY as the org tier grows.
+    workers = max(1, min(n, int(os.environ.get("FANOUT_CONCURRENCY", "3"))))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         concepts = list(pool.map(run_one, range(n)))
 
     return {

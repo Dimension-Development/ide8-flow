@@ -38,7 +38,10 @@ class GenConfig:
     escalate_after_failures: int = 2  # validation/repair failures -> strong
     escalate_after_critiques: int = 2  # rejected critiques -> strong
     proof_dpi: int = 120
-    max_tokens: int = 16000
+    # A full document emission is typically 2-4k output tokens; 8k is
+    # generous headroom while staying inside low-tier OTPM rate limits
+    # (Tier 1 = 8k output tokens/min — a 16k request can never be admitted).
+    max_tokens: int = 8000
 
 
 @dataclass

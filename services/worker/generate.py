@@ -69,7 +69,8 @@ def main(argv=None):
     print(f"fan-out: {args.n} concepts, pack {pack['version']}, "
           f"fast={cfg.fast_model}, strong={cfg.strong_model}, db={args.db}")
     summary = generate_and_store(
-        brief, n=args.n, store=store, client=anthropic.Anthropic(),
+        brief, n=args.n, store=store,
+        client=anthropic.Anthropic(max_retries=6),
         render=render, pack=pack, schema_json=schema_json,
         schema_path=args.schema, profile=profile, config=cfg)
 

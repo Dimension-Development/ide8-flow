@@ -152,6 +152,37 @@ class TestJobs(unittest.TestCase):
         self.assertEqual(j["status"], "done")
         self.assertIsNotNone(j["finished_at"])
 
+    def test_one_failing_concept_does_not_kill_the_job(self):
+        # Live finding (11 Jun 2026): a 429 rate-limit error on one concept
+        # propagated and failed the entire fan-out.
+        from generation.service import generate_and_store
+        from test_generation_loop import critique_resp
+
+        class FlakyClient(ScriptedClient):
+            def create(self, **kwargs):
+                resp = super().create(**kwargs)
+                if resp == "RAISE":
+                    raise RuntimeError("rate_limit_error: 429")
+                return resp
+
+        s = temp_store()
+        jid = s.create_job({"title": "t"}, 2)
+        client = FlakyClient([emit_resp(valid_doc()), critique_resp(True),
+                              "RAISE"])
+        import os
+        os.environ["FANOUT_CONCURRENCY"] = "1"  # deterministic ordering
+        try:
+            summary = generate_and_store(
+                {"title": "t"}, n=2, store=s, client=client,
+                render=FakeRender(), pack=PACK, schema_json=SCHEMA_JSON,
+                schema_path=SCHEMA_PATH, profile=PROFILE, job_id=jid)
+        finally:
+            del os.environ["FANOUT_CONCURRENCY"]
+        self.assertEqual(summary["approved"], 1)
+        errors = [c["error"] for c in summary["concepts"] if c["error"]]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("429", errors[0])
+
     def test_failed_job_records_error(self):
         s = temp_store()
         jid = s.create_job({}, 1)

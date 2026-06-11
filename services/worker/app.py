@@ -62,7 +62,9 @@ def _gen_deps():
                 os.environ.get("BRAND_PROFILE",
                                str(WORKER_ROOT / "examples"
                                    / "brand_profile.json"))),
-            "client": anthropic.Anthropic(),
+            # generous retries: 429s during fan-out bursts resolve within
+            # the minute window; the SDK honours retry-after with backoff
+            "client": anthropic.Anthropic(max_retries=6),
             "render": RenderClient(
                 os.environ.get("RENDER_URL", "http://localhost:8127")),
         })
