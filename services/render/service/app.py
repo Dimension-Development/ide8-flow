@@ -12,6 +12,8 @@ xvfb; warm-process pooling (RND-4) is a follow-up — the skeleton spawns per
 request, which is correct first and fast second.
 """
 
+import base64
+import json
 import os
 import shutil
 import subprocess
@@ -80,10 +82,19 @@ def _export_pdf(sla_bytes: bytes, kind: str, workdir: Path) -> Path:
     return pdf
 
 
+def _overflows(pdf: Path):
+    """VAL-6 report written by export_pdf.py next to the PDF."""
+    report = Path(str(pdf) + ".report.json")
+    if not report.exists():
+        return []
+    return json.loads(report.read_text()).get("overflows", [])
+
+
 @app.post("/proof")
 async def proof(request: Request,
                 dpi: int = Query(150, ge=36, le=600),
-                page: int = Query(1, ge=1)):
+                page: int = Query(1, ge=1),
+                meta: bool = Query(False)):
     sla_bytes = await request.body()
     if not sla_bytes:
         raise HTTPException(status_code=400, detail="body must be SLA bytes")
@@ -99,7 +110,16 @@ async def proof(request: Request,
         if not png.exists():
             raise HTTPException(status_code=500, detail={
                 "stage": "pdftoppm", "stderr": res.stderr[-2000:]})
-        return Response(content=png.read_bytes(), media_type="image/png")
+        overflows = _overflows(pdf)
+        if meta:
+            return JSONResponse(content={
+                "png_b64": base64.b64encode(png.read_bytes()).decode(),
+                "overflows": overflows,
+                "dpi": dpi,
+                "page": page,
+            })
+        return Response(content=png.read_bytes(), media_type="image/png",
+                        headers={"X-Overflow-Count": str(len(overflows))})
 
 
 @app.post("/package")

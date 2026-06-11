@@ -1,0 +1,22 @@
+{
+  "name": "Example Brand",
+  "version": "0.1",
+  "swatches": [
+    { "name": "BrandRed", "space": "cmyk", "values": [0, 90, 78, 8] },
+    { "name": "DeepInk", "space": "cmyk", "values": [80, 60, 0, 70] },
+    { "name": "Cream", "space": "cmyk", "values": [0, 4, 12, 0] },
+    { "name": "CutContour", "space": "cmyk", "values": [0, 100, 0, 0], "spot": true }
+  ],
+  "fonts": [
+    "Liberation Sans Regular",
+    "Liberation Sans Bold"
+  ],
+  "charStyles": [],
+  "paraStyles": [],
+  "rules": {
+    "minTypeSize": 8,
+    "contrastFloor": 3.0,
+    "safeZone": true,
+    "mandatoryElements": []
+  }
+}

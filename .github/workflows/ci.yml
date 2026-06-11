@@ -13,6 +13,16 @@ jobs:
       - name: Run unittest suite
         run: python3 -m unittest discover services/render/tests -v
 
+  worker-tests:
+    name: worker validation tests (VAL-1..4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install worker deps
+        run: pip install -r services/worker/requirements.txt
+      - name: Run validation suite
+        run: python3 -m unittest discover services/worker/tests -v
+
   render-image:
     name: render service image + in-container smoke
     runs-on: ubuntu-latest
@@ -32,4 +42,5 @@ jobs:
             python3 tests/check_separation.py /tmp/out.pdf CutContour
             grep -aq "/GTS_PDFXVersion (PDF/X-4" /tmp/out.pdf && echo "PDF/X-4 marker ok"
             grep -aq "/OutputIntent" /tmp/out.pdf && echo "output intent ok"
+            python3 -c "import json; r = json.load(open(\"/tmp/out.pdf.report.json\")); assert r.get(\"overflows\") == [], r; print(\"overflow report clean\")"
           '

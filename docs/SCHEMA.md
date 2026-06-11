@@ -1,6 +1,6 @@
 # ide8.flow document schema — reference v0.1
 
-**Normative spec** for the document JSON that the generation engine authors and the compiler consumes (PRD §13.2). This graduates to a formal JSON Schema file in M1 (VAL-1); until then, this file is the contract. Compiler implementation notes (donor template, scratch-space translation, PTYPE defaults) live in the spike README alongside `sla_compiler.py`.
+**Normative spec** for the document JSON that the generation engine authors and the compiler consumes (PRD §13.2). The formal JSON Schema is [`schema/document-0.1.schema.json`](../schema/document-0.1.schema.json) (VAL-1); this file remains the human-readable contract — the two must not drift. Compiler implementation notes (donor template, scratch-space translation, PTYPE defaults) live in the spike README alongside `sla_compiler.py`.
 
 ## Terminology
 

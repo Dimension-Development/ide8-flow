@@ -4,10 +4,12 @@
 
 | | |
 |---|---|
-| Version | 0.2 |
+| Version | 0.3 |
 | Date | 11 June 2026 |
 | Owner | Luke — Print Services Director, Dimension Development Ltd |
-| Status | Pre-development. Greenfield build; render-engine architecture proven in spike (see §13.1) |
+| Status | In development. M0 (render service) complete; M1 (generation loop) underway |
+
+**Changes in v0.3** — M0 exit criteria met (11 Jun 2026): byte-identical recompile CI-gated; packaged PDF/X-4 with named `/Separation /CutContour` passed PitStop preflight first time + manual Illustrator review · §12 spot-separation risk closed — root cause was the PDF export output destination (screen → RGB conversion), not CMS prefs; fixed with printer output (`outdst=1`) · `/package` emits formal PDF/X-4 (output intent: bundled basICColor ISO Coated v2 300%; X-1a/X-3 selectable) · measured headless export ~0.5 s — RND-4 warm-process pool reclassified from expectation to optional optimisation.
 
 **Changes in v0.2** — terminology fixed: generated instances are *documents*, the spec they conform to is the *document schema* · RND-3 sharpened to require *named* separations after verification of the spike PDF (`/Separation /All` false-pass trap) · byte-stable compilation added to RND-2 and the M0 exit criteria · RND-4 acknowledges the warm-renderer process model · VAL-6 promoted P1 → P0 and added to M1 · document-schema versioning / no-migration policy added to §8 and §10 · normative schema spec extracted to `docs/SCHEMA.md` (§13.2).
 
@@ -130,8 +132,8 @@ Deterministic, ordered cheapest-first. VAL-1..5 run pre-render; VAL-6 reads back
 
 - **RND-1 (P0)** Stateless Docker service: Scribus 1.6.x + xvfb + poppler + licensed fonts baked into the image. FastAPI endpoints: `POST /compile` (JSON→SLA), `POST /proof` (SLA→PNG at requested dpi), `POST /package` (SLA→PDF/X), `GET /fonts`, `GET /healthz`.
 - **RND-2 (P0)** Compiler per the proven spike: donor-template boilerplate, per-PTYPE harvested defaults, page-relative→scratch translation, SVG path geometry, run-based text. Pinned to the Scribus version in the image; donor regenerated on image build. **Compilation is byte-stable:** identical document + compiler version + donor template produces a byte-identical SLA (deterministic item IDs, stable element order) — prerequisite for golden-file CI and the §8 reproducibility NFR. *(Known spike gap: the spike compiler generates random item IDs; fix lands in M0.)*
-- **RND-3 (P0)** Spot-colour fidelity: packaged PDF/X must contain a `/Separation` colourspace **named for each spot swatch** (e.g. `/Separation /CutContour`). Acceptance test inspects the decompressed PDF for the *named* separation — presence of any `/Separation` alone is a false pass, because crop marks always contribute `/Separation /All` (registration). *(Verified on the spike output: the exported PDF's only separation is `/Separation /All`; CutContour was converted to process — see §12.)*
-- **RND-4 (P0)** Proof render: < 2 s p95 at review resolution; deterministic output for identical input. Cold Scribus + xvfb startup alone exceeds this budget, so the service keeps **long-lived warm renderer processes**; "stateless" means no shared persistent state and per-request temp dirs, not process-per-request.
+- **RND-3 (P0)** Spot-colour fidelity: packaged PDF/X must contain a `/Separation` colourspace **named for each spot swatch** (e.g. `/Separation /CutContour`). Acceptance test inspects the decompressed PDF for the *named* separation — presence of any `/Separation` alone is a false pass, because crop marks always contribute `/Separation /All` (registration). *(Verified on the spike output: the exported PDF's only separation was `/Separation /All`; CutContour was converted to process.)* **Status: met (11 Jun 2026)** — root cause was `outdst=0` (screen output → RGB); package export sets printer output, emits PDF/X-4 with output intent, and CI gates the named separation + conformance marker. PitStop preflight passed first time.
+- **RND-4 (P0)** Proof render: < 2 s p95 at review resolution; deterministic output for identical input. *(Measured 11 Jun 2026 in-container: ~0.5 s headless export, ~0.6 s proof round trip over HTTP — per-request spawn is already inside budget; the warm-process pool is an optional optimisation held in reserve, not a requirement.)*
 - **RND-5 (P1)** Image frames: assets fetched from Supabase Storage to local scratch pre-compile; missing-asset = hard validation failure.
 - **RND-6 (P2)** Chained text frames (`NEXTITEM`/`BACKITEM`), text-on-path, gradients.
 - **RND-7 (P2)** IDML export endpoint for InDesign handoff.
@@ -218,7 +220,7 @@ Stack choices follow the established house pattern: FastAPI microservices in Doc
 
 | Milestone | Contents | Exit criteria |
 |---|---|---|
-| **M0 — Render service** (wks 1–2) | RND-1..4, RND-8; compiler hardening (incl. byte-stable compilation); spot-colour fix; golden-file CI | example.json → PDF/X with `/Separation /CutContour` (named, per RND-3), passing PitStop preflight; recompiling example.json is byte-identical (golden-file CI green) |
+| **M0 — Render service** (wks 1–2) | RND-1..4, RND-8; compiler hardening (incl. byte-stable compilation); spot-colour fix; golden-file CI | example.json → PDF/X with `/Separation /CutContour` (named, per RND-3), passing PitStop preflight; recompiling example.json is byte-identical (golden-file CI green) — **met 11 Jun 2026** (PitStop first-time pass + manual Illustrator review; CI green) |
 | **M1 — Generation loop** (wks 3–5) | GEN-1..7, VAL-1..4, VAL-6..7, BRAND-1..2, ADM-1..2 | Brief JSON → 6 validated concepts with self-critique loop, fully via API |
 | **M2 — Internal MVP UI** (wks 6–9) | AUTH-1/3, BRF-1..2, REV-1..3, EXP-1, BRAND-3 | Alex's team runs a real brief end-to-end internally |
 | **M3 — Client review + handoff** (wks 10–14) | AUTH-2/4, REV-5..7/9, VAR-1..2, EXP-2..3, PRD-1..3, BRF-4 | A live client review and a released job through PitStop/Phoenix |
@@ -230,7 +232,7 @@ Build sequence within each milestone follows atomic decomposition; requirement I
 
 | Risk | Mitigation |
 |---|---|
-| **Spot separation in PDF export** (verified spike issue: exported PDF contains only `/Separation /All` from crop marks; CutContour converted to process) | M0 blocking task; investigate Scribus CMS prefs (`prefs160.xml`) and export options; acceptance = `/Separation /CutContour` (named) in decompressed PDF — see RND-3 false-pass note. Fallback: post-process spot recolouring via PitStop action list (already licensed) |
+| ~~Spot separation in PDF export~~ **CLOSED 11 Jun 2026** | Root cause: `PDFfile.outdst` defaults to screen output (RGB conversion) — not CMS prefs. Fixed with `outdst=1` (printer); named separation + PDF/X-4 marker CI-gated; PitStop fallback not needed |
 | SLA format drift across Scribus versions | Version pinned via Docker image; donor template + PTYPE defaults regenerated in image build; golden-file CI |
 | Render latency blows the 2 s proof budget | Warm long-lived Scribus renderer processes per container (RND-4); startup cost paid once per replica, not per request |
 | LLM layout quality below studio bar | Few-shot exemplar library curated from real Dimension work; designer-in-the-loop positioning; fan-out volume compensates |
@@ -256,3 +258,4 @@ JSON document → Python compiler (stdlib-only, donor-template architecture) →
 |---|---|---|
 | 0.1 | 11 Jun 2026 | Initial draft (archived at `docs/archive/ide8flow-PRD-v0.1.md`) |
 | 0.2 | 11 Jun 2026 | See **Changes in v0.2** at top |
+| 0.3 | 11 Jun 2026 | M0 exit recorded; spot-separation risk closed; PDF/X-4 default; RND-4 measurements |

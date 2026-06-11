@@ -34,6 +34,7 @@
   <STYLE NAME="Default Paragraph Style" DefaultStyle="1" ALIGN="0" DIRECTION="0" LINESPMode="0" LINESP="15" INDENT="0" RMARGIN="0" FIRST="0" VOR="0" NACH="0" ParagraphEffectOffset="0" DROP="0" DROPLIN="2" Bullet="0" Numeration="0" HyphenConsecutiveLines="2" BCOLOR="None" BSHADE="100" />
   <STYLE NAME="Headline" ALIGN="1" INDENT="0" FIRST="0" VOR="0" NACH="0" LINESPMode="0" LINESP="52" CPARENT="HeadChar" />
   <STYLE NAME="Subhead" ALIGN="1" INDENT="0" FIRST="0" VOR="6" NACH="0" LINESPMode="0" LINESP="22" CPARENT="SubChar" />
+  <STYLE NAME="SubheadInk" ALIGN="0" INDENT="0" FIRST="0" VOR="0" NACH="8" LINESPMode="0" LINESP="22" CPARENT="EmphChar" />
   <STYLE NAME="Body" ALIGN="0" INDENT="0" FIRST="0" VOR="0" NACH="8" LINESPMode="0" LINESP="15" CPARENT="BodyChar" />
   <TableStyle NAME="Default Table Style" DefaultStyle="1" FillColor="None" FillShade="100">
    <TableBorderLeft>
@@ -124,9 +125,9 @@
   <PAGEOBJECT OwnPage="1" ItemID="100000005" PTYPE="6" XPOS="91.5" YPOS="1602" WIDTH="612" HEIGHT="150.5" ROT="0" PWIDTH="1" PCOLOR="DeepInk" PCOLOR2="None" PLINEART="1" PLINEEND="0" PLINEJOIN="0" LOCALSCX="1" LOCALSCY="1" LOCALX="0" LOCALY="0" LOCALROT="0" PICART="1" SCALETYPE="1" RATIO="1" PRINTABLE="1" ANNOTATION="0" BOOKMARK="0" FRTYPE="3" CLIPEDIT="1" NEXTITEM="-1" BACKITEM="-1" LAYER="0" ANNAME="footer-band" TEXTFLOWMODE="0" path="M0 0 L612 0 L612 150.5 L0 150.5 L0 0 Z" />
   <PAGEOBJECT OwnPage="1" ItemID="100000006" PTYPE="4" XPOS="160" YPOS="962" WIDTH="475" HEIGHT="300" ROT="0" PWIDTH="1" PCOLOR="None" PCOLOR2="None" COLUMNS="1" COLGAP="0" AUTOTEXT="0" EXTRA="0" TEXTRA="0" BEXTRA="0" REXTRA="0" VAlign="0" FLOP="0" PLINEART="1" PLINEEND="0" PLINEJOIN="0" LOCALSCX="1" LOCALSCY="1" LOCALX="0" LOCALY="0" LOCALROT="0" PICART="1" SCALETYPE="1" RATIO="1" PRINTABLE="1" ANNOTATION="0" BOOKMARK="0" FRTYPE="0" CLIPEDIT="0" NEXTITEM="-1" BACKITEM="-1" LAYER="0" ANNAME="spec-notes" BASEOF="0" TEXTFLOWMODE="0" path="M0 0 L475 0 L475 300 L0 300 L0 0 Z">
    <StoryText>
-    <DefaultStyle PARENT="Subhead" />
+    <DefaultStyle PARENT="SubheadInk" />
     <ITEXT CH="PRODUCTION SPEC" />
-    <para PARENT="Subhead" />
+    <para PARENT="SubheadInk" />
     <ITEXT CH="Substrate: 3mm display board. Print: UV flatbed, CMYK + spot CutContour for the shaped tab. Finish: matt laminate." />
     <para PARENT="Body" />
     <ITEXT CH="Cut path runs as a named spot separation and must not knock out underlying artwork." />

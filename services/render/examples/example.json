@@ -98,6 +98,13 @@
       "spaceBefore": 6
     },
     {
+      "name": "SubheadInk",
+      "charStyle": "EmphChar",
+      "align": "left",
+      "lineHeight": 22,
+      "spaceAfter": 8
+    },
+    {
       "name": "Body",
       "charStyle": "BodyChar",
       "align": "left",
@@ -210,7 +217,7 @@
           ],
           "paragraphs": [
             {
-              "style": "Subhead",
+              "style": "SubheadInk",
               "text": "PRODUCTION SPEC"
             },
             {

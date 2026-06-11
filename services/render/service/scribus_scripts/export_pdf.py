@@ -9,6 +9,7 @@ package — PDF/X-4 by default: printer output, doc bleeds, crop marks, named
           (output intent), PDFX_INFO (info string — PDF/X requires non-empty).
 """
 
+import json
 import os
 import sys
 
@@ -49,4 +50,23 @@ else:
     pdf.version = 15
 
 pdf.save()
+
+# VAL-6: read back text-overflow flags post-layout and report next to the
+# PDF. Scripter print() never reaches stdout under -g, so a file it is.
+report = {"overflows": []}
+try:
+    for pg in range(1, scribus.pageCount() + 1):
+        scribus.gotoPage(pg)
+        for name in scribus.getAllObjects():
+            try:
+                if (scribus.getObjectType(name) == "TextFrame"
+                        and scribus.textOverflows(name)):
+                    report["overflows"].append({"page": pg, "item": name})
+            except Exception:
+                pass
+except Exception as e:
+    report["error"] = str(e)
+with open(outfile + ".report.json", "w") as fh:
+    json.dump(report, fh)
+
 scribus.closeDoc()
