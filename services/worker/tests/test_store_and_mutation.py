@@ -193,6 +193,22 @@ class TestJobs(unittest.TestCase):
         self.assertIn("render", j["error"])
 
 
+class TestEnginePresets(unittest.TestCase):
+
+    def test_presets_resolve_to_whitelisted_pairs(self):
+        from app import MODEL_PRESETS, resolve_preset
+        for name, (fast, strong) in MODEL_PRESETS.items():
+            cfg = resolve_preset(name)
+            self.assertEqual((cfg.fast_model, cfg.strong_model),
+                             (fast, strong))
+
+    def test_unknown_preset_is_rejected(self):
+        from fastapi import HTTPException
+        from app import resolve_preset
+        with self.assertRaises(HTTPException):
+            resolve_preset("claude-anything-i-typed")
+
+
 class TestDiff(unittest.TestCase):
 
     def test_diff_paths(self):

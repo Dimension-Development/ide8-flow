@@ -76,7 +76,26 @@ def healthz():
     return {"ok": True}
 
 
-def _run_job(job_id, brief, n):
+# Designer-facing presets (GEN-5: users pick quality/cost, the engine maps
+# to a fast/strong routing pair). Whitelist — never feed request strings
+# straight into the SDK.
+MODEL_PRESETS = {
+    "draft": ("claude-haiku-4-5", "claude-sonnet-4-6"),
+    "standard": ("claude-sonnet-4-6", "claude-opus-4-8"),
+    "premium": ("claude-opus-4-8", "claude-opus-4-8"),
+}
+
+
+def resolve_preset(name):
+    if name not in MODEL_PRESETS:
+        raise HTTPException(
+            400, f"unknown engine preset {name!r} — one of "
+                 f"{sorted(MODEL_PRESETS)}")
+    fast, strong = MODEL_PRESETS[name]
+    return GenConfig(fast_model=fast, strong_model=strong)
+
+
+def _run_job(job_id, brief, n, config):
     store, s = _gen_deps()
     store.set_job_status(job_id, "running")
     try:
@@ -84,7 +103,7 @@ def _run_job(job_id, brief, n):
             brief, n=n, store=store, client=s["client"], render=s["render"],
             pack=s["pack"], schema_json=s["schema_json"],
             schema_path=SCHEMA_PATH, profile=s["profile"],
-            config=GenConfig(), job_id=job_id)
+            config=config, job_id=job_id)
         store.set_job_status(job_id, "done", finished=True)
     except Exception as e:  # noqa: BLE001 — job must always reach a terminal state
         store.set_job_status(job_id, "failed", error=str(e)[:2000],
@@ -99,11 +118,14 @@ def generate(payload: dict = Body(...)):
     if not brief:
         raise HTTPException(400, "payload needs a 'brief' object")
     n = max(1, min(int(payload.get("n", 6)), 8))
+    config = resolve_preset(payload.get("engine", "standard"))
     store, _ = _gen_deps()  # construct deps eagerly: fail in-request, not in-thread
     job_id = store.create_job(brief, n)
-    threading.Thread(target=_run_job, args=(job_id, brief, n),
+    threading.Thread(target=_run_job, args=(job_id, brief, n, config),
                      daemon=True).start()
-    return {"job_id": job_id, "status": "queued", "n": n}
+    return {"job_id": job_id, "status": "queued", "n": n,
+            "models": {"fast": config.fast_model,
+                       "strong": config.strong_model}}
 
 
 @app.get("/jobs/{job_id}")

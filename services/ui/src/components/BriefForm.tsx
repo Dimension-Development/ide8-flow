@@ -1,7 +1,13 @@
 import { useState } from "react";
-import { api, type Brief } from "../api";
+import { api, type Brief, type EnginePreset } from "../api";
 
 const SIZES = ["A4", "A3", "A2", "A1", "A5", "SRA3"];
+
+const ENGINES: { value: EnginePreset; label: string }[] = [
+  { value: "draft", label: "Draft — Haiku, fastest & cheapest" },
+  { value: "standard", label: "Standard — Sonnet, Opus escalation" },
+  { value: "premium", label: "Premium — Opus throughout" },
+];
 
 export default function BriefForm({
   onStarted,
@@ -18,6 +24,7 @@ export default function BriefForm({
   const [size, setSize] = useState("A4");
   const [orientation, setOrientation] = useState("portrait");
   const [n, setN] = useState(6);
+  const [engine, setEngine] = useState<EnginePreset>("standard");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,7 +54,7 @@ export default function BriefForm({
       notes: notes.trim(),
     };
     try {
-      const { job_id } = await api.generate(brief, n);
+      const { job_id } = await api.generate(brief, n, engine);
       onStarted(job_id);
     } catch (e) {
       setError(String(e));
@@ -97,6 +104,20 @@ export default function BriefForm({
               {[2, 4, 6, 8].map((v) => <option key={v}>{v}</option>)}
             </select>
           </div>
+        </div>
+        <div>
+          <label className={label}>Engine</label>
+          <select
+            className={field}
+            value={engine}
+            onChange={(e) => setEngine(e.target.value as EnginePreset)}
+          >
+            {ENGINES.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label className={label}>Headline *</label>

@@ -83,12 +83,14 @@ export interface Job {
   concepts: Concept[];
 }
 
+export type EnginePreset = "draft" | "standard" | "premium";
+
 export const api = {
-  generate: (brief: Brief, n: number) =>
+  generate: (brief: Brief, n: number, engine: EnginePreset) =>
     fetch("/api/generate", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ brief, n }),
+      body: JSON.stringify({ brief, n, engine }),
     }).then((r) => j<{ job_id: string }>(r)),
   job: (id: string) => fetch(`/api/jobs/${id}`).then((r) => j<Job>(r)),
   slaUrl: (versionId: string) => `/api/versions/${versionId}/document.sla`,
