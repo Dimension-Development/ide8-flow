@@ -33,7 +33,10 @@ fixing a contrast bug purely from looking at the rendered proof.
   `DOCUMENT` preference attributes and required children. Regenerate with
   `service/scribus_scripts/gen_donor.py` when bumping Scribus.
 - `service/app.py` — FastAPI service: `/compile`, `/proof`, `/package`,
-  `/fonts`, `/healthz`. Per-request temp dirs, no shared state.
+  `/fonts`, `/healthz`. Per-request temp dirs, no shared state. `/proof`
+  and `/package` also accept a JSON envelope `{sla_b64, assets:
+  {relpath: b64}}` (RND-5) — assets are staged into the request workdir
+  (path-traversal guarded) so relative `PFILE` paths resolve.
 - `service/scribus_scripts/` — scripts that run *inside* headless Scribus:
   `export_pdf.py` (SLA → PDF, proof/package modes), `gen_donor.py`.
 - `examples/example.json` — a 2-page POS header card exercising every feature.

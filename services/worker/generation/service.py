@@ -17,10 +17,17 @@ from generation.mutation import mutate_document  # noqa: E402
 SCHEMA_VERSION = "0.1"
 
 
+def _asset_map(store):
+    """All uploaded assets with bytes, keyed by name (RND-5)."""
+    return {meta["name"]: store.get_asset(meta["name"])
+            for meta in store.list_assets()}
+
+
 def generate_and_store(brief, *, n, store, client, render, pack,
                        schema_json, schema_path, profile, config=None,
                        job_id=None):
     archetypes = pack["archetypes"]
+    assets = _asset_map(store)
 
     def run_one(i):
         archetype = archetypes[i % len(archetypes)]
@@ -29,7 +36,7 @@ def generate_and_store(brief, *, n, store, client, render, pack,
             r = generate_concept(
                 brief, profile, archetype, client=client, render=render,
                 pack=pack, schema_json=schema_json, schema_path=schema_path,
-                config=config)
+                config=config, assets=assets)
         except Exception as e:  # noqa: BLE001 — one concept must not kill the job
             return {
                 "concept_id": concept_id, "version_id": None,
@@ -87,7 +94,8 @@ def mutate_and_store(version_id, instruction, *, store, client, render,
     r = mutate_document(
         parent["document"], instruction, profile, client=client,
         render=render, pack=pack, schema_json=schema_json,
-        schema_path=schema_path, config=config)
+        schema_path=schema_path, config=config,
+        assets=_asset_map(store))
 
     new_id = None
     if r.document is not None:

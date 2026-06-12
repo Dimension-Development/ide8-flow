@@ -15,6 +15,7 @@ WORKER_ROOT = Path(__file__).resolve().parents[1]
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
+from assets import resolve_srcs  # noqa: E402
 from brand import merge_profile  # noqa: E402
 from validation import run_validation  # noqa: E402
 from generation import prompts  # noqa: E402
@@ -76,16 +77,19 @@ def _mutation_message(document, instruction):
 
 
 def mutate_document(document, instruction, profile, *, client, render,
-                    pack, schema_json, schema_path, config=None):
+                    pack, schema_json, schema_path, config=None,
+                    assets=None):
     cfg = config or GenConfig(max_iterations=3)
     meter = Meter()
     result = MutationResult()
+    assets = assets or {}
 
     system = prompts.build_system(pack, schema_json, profile,
                                   exemplar=pack.get("exemplar", {}))
     tools = [_emit_tool(schema_json)]
     messages = [{"role": "user",
-                 "content": _mutation_message(document, instruction)}]
+                 "content": _mutation_message(document, instruction)
+                 + prompts.assets_section(list(assets.values()))}]
     model = cfg.fast_model
 
     for iteration in range(1, cfg.max_iterations + 1):
@@ -107,7 +111,8 @@ def mutate_document(document, instruction, profile, *, client, render,
             revised["version"] = str(revised["version"])
         messages.append({"role": "assistant", "content": resp.content})
 
-        report = run_validation(revised, profile, schema_path)
+        report = run_validation(revised, profile, schema_path,
+                                asset_names=assets.keys())
         result.validation = report
         if not report["ok"]:
             if model != cfg.strong_model:
@@ -116,15 +121,17 @@ def mutate_document(document, instruction, profile, *, client, render,
                 emit.id, json.dumps(report), is_error=True)]})
             continue
 
+        staged, files = resolve_srcs(merge_profile(revised, profile), assets)
         try:
-            sla = render.compile(merge_profile(revised, profile))
+            sla = render.compile(staged)
         except CompileRejected as e:
             messages.append({"role": "user", "content": [_tool_result(
                 emit.id, json.dumps({"ok": False, "errors": e.errors}),
                 is_error=True)]})
             continue
 
-        png_b64, overflows = render.proof_meta(sla, dpi=cfg.proof_dpi)
+        png_b64, overflows = render.proof_meta(sla, dpi=cfg.proof_dpi,
+                                               assets=files)
         if overflows:
             messages.append({"role": "user", "content": [_tool_result(
                 emit.id, json.dumps({"ok": False, "errors": [

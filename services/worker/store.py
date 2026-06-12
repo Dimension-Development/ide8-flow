@@ -52,6 +52,15 @@ CREATE TABLE IF NOT EXISTS doc_version (
 );
 CREATE INDEX IF NOT EXISTS idx_version_concept
     ON doc_version (concept_id, created_at);
+CREATE TABLE IF NOT EXISTS asset (
+    name TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    data BLOB NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS job (
     id TEXT PRIMARY KEY,
     brief_json TEXT NOT NULL,
@@ -114,6 +123,42 @@ class DocStore:
                 "SELECT * FROM concept WHERE job_id = ? ORDER BY created_at",
                 (job_id,)).fetchall()
         return [self._concept_row(r) for r in rows]
+
+    # ---------------------------------------------------------- assets
+
+    def add_asset(self, name, filename, mime, width, height, data):
+        """Assets are write-once: versions reference them by name, so
+        overwriting would silently rewrite history. Returns False if the
+        name is taken."""
+        with closing(self._connect()) as db:
+            try:
+                db.execute(
+                    "INSERT INTO asset (name, filename, mime, width, height,"
+                    " data) VALUES (?,?,?,?,?,?)",
+                    (name, filename, mime, width, height, data))
+                db.commit()
+            except Exception:  # sqlite3.IntegrityError — name taken
+                return False
+        return True
+
+    def list_assets(self):
+        with closing(self._connect()) as db:
+            rows = db.execute(
+                "SELECT name, filename, mime, width, height,"
+                " length(data) AS size, created_at FROM asset"
+                " ORDER BY created_at").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_asset(self, name):
+        with closing(self._connect()) as db:
+            row = db.execute(
+                "SELECT * FROM asset WHERE name = ?", (name,)).fetchone()
+        if row is None:
+            return None
+        return {"name": row["name"], "filename": row["filename"],
+                "mime": row["mime"], "width": row["width"],
+                "height": row["height"], "data": row["data"],
+                "created_at": row["created_at"]}
 
     # ---------------------------------------------------------- jobs
 

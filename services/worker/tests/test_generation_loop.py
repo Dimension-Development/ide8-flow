@@ -70,11 +70,15 @@ class ScriptedClient:
 class FakeRender:
     def __init__(self, overflow_rounds=None):
         self.overflow_rounds = list(overflow_rounds or [])
+        self.compiled = []
+        self.last_assets = None
 
     def compile(self, document):
+        self.compiled.append(document)
         return b"<SCRIBUSUTF8NEW/>"
 
-    def proof_meta(self, sla_bytes, dpi=120):
+    def proof_meta(self, sla_bytes, dpi=120, assets=None):
+        self.last_assets = assets
         overflows = self.overflow_rounds.pop(0) if self.overflow_rounds else []
         return "UE5HZmFrZQ==", overflows
 
@@ -202,6 +206,31 @@ class TestLoop(unittest.TestCase):
         self.assertTrue(r.approved)
         self.assertEqual(r.iterations, 1)
         self.assertEqual(r.document["version"], "0.1")
+
+    def test_assets_staged_through_to_render(self):
+        # RND-5: a concept using an asset ships the file with the proof call.
+        from test_assets import doc_with_image, make_png
+        png = make_png()
+        assets = {"logo-primary": {
+            "name": "logo-primary", "mime": "image/png",
+            "width": 120, "height": 80, "data": png}}
+        render = FakeRender()
+        client = ScriptedClient([emit_resp(doc_with_image()),
+                                 critique_resp(True)])
+        r = generate_concept(
+            BRIEF, PROFILE, "Hero split", client=client, render=render,
+            pack=PACK, schema_json=SCHEMA_JSON, schema_path=SCHEMA_PATH,
+            assets=assets)
+        self.assertTrue(r.approved)
+        self.assertEqual(render.last_assets,
+                         {"assets/logo-primary.png": png})
+        staged_item = render.compiled[0]["pages"][0]["items"][-1]
+        self.assertEqual(staged_item["src"], "assets/logo-primary.png")
+        # the PERSISTED document keeps the asset NAME, not the staged path
+        self.assertEqual(
+            r.document["pages"][0]["items"][-1]["src"], "logo-primary")
+        # and the model was told what exists
+        self.assertIn("logo-primary", client.calls[0]["messages"][0]["content"])
 
     def test_forced_tool_choice_on_every_call(self):
         client = ScriptedClient([emit_resp(valid_doc()),

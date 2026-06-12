@@ -90,16 +90,43 @@ def _overflows(pdf: Path):
     return json.loads(report.read_text()).get("overflows", [])
 
 
+async def _read_render_request(request: Request):
+    """Raw SLA bytes, or the RND-5 JSON envelope {sla_b64, assets} — assets
+    are staged into the per-request workdir so relative PFILE paths in the
+    SLA resolve against the document location."""
+    if request.headers.get("content-type", "").startswith("application/json"):
+        body = await request.json()
+        if "sla_b64" not in body:
+            raise HTTPException(status_code=400, detail="missing sla_b64")
+        sla = base64.b64decode(body["sla_b64"])
+        assets = {rel: base64.b64decode(b64)
+                  for rel, b64 in (body.get("assets") or {}).items()}
+        return sla, assets
+    return await request.body(), {}
+
+
+def _stage_assets(workdir: Path, assets):
+    root = workdir.resolve()
+    for rel, data in assets.items():
+        target = (workdir / rel).resolve()
+        if root != target and root not in target.parents:
+            raise HTTPException(status_code=400,
+                                detail=f"bad asset path {rel!r}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+
+
 @app.post("/proof")
 async def proof(request: Request,
                 dpi: int = Query(150, ge=36, le=600),
                 page: int = Query(1, ge=1),
                 meta: bool = Query(False)):
-    sla_bytes = await request.body()
+    sla_bytes, assets = await _read_render_request(request)
     if not sla_bytes:
         raise HTTPException(status_code=400, detail="body must be SLA bytes")
     with tempfile.TemporaryDirectory(prefix="rnd-proof-") as td:
         workdir = Path(td)
+        _stage_assets(workdir, assets)
         pdf = _export_pdf(sla_bytes, "proof", workdir)
         png = workdir / "proof.png"
         res = subprocess.run(
@@ -124,9 +151,11 @@ async def proof(request: Request,
 
 @app.post("/package")
 async def package(request: Request):
-    sla_bytes = await request.body()
+    sla_bytes, assets = await _read_render_request(request)
     if not sla_bytes:
         raise HTTPException(status_code=400, detail="body must be SLA bytes")
     with tempfile.TemporaryDirectory(prefix="rnd-pkg-") as td:
-        pdf = _export_pdf(sla_bytes, "package", Path(td))
+        workdir = Path(td)
+        _stage_assets(workdir, assets)
+        pdf = _export_pdf(sla_bytes, "package", workdir)
         return Response(content=pdf.read_bytes(), media_type="application/pdf")

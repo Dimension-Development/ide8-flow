@@ -28,8 +28,12 @@ brief ──▶ Claude (emit_document) ──▶ VAL-1..4 ──▶ render /comp
   provenance, proof rasters and content hashes. SQLite for M1; the schema
   mirrors PRD §10 so the M2 move to Supabase Postgres is a driver swap.
   Immutability is enforced by DB triggers, not convention.
+- `assets.py` + `validation/assets_check.py` — RND-5: documents reference
+  image assets BY NAME; unknown names are hard validation failures;
+  resolve_srcs() stages bytes to the render service per request.
 - `app.py` — worker API: `POST /generate`, `GET /concepts[/{id}]`,
-  `GET /versions/{id}[/proof.png]`, `POST /versions/{id}/mutate`.
+  `GET /versions/{id}[/proof.png]`, `POST /versions/{id}/mutate`,
+  `POST|GET /assets` (write-once image library, dims sniffed on upload).
 - `generate.py` — CLI over the same service path.
 
 ## Model routing (GEN-5)
@@ -75,3 +79,7 @@ python3 -m unittest discover tests
   yields defensible-but-unexpected readings. The before/after proof pair
   plus the structural diff is the designer's safety net; instruction
   authoring guidance belongs in the M2 review UI.
+- `.sla` downloads of documents with image items reference
+  `assets/<name>.<ext>` relative paths — hand-finishers need the asset
+  files alongside the .sla. A zip bundle (sla + assets) is the obvious
+  EXP-1 follow-up.

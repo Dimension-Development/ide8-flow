@@ -40,12 +40,31 @@ def build_system(pack, schema_json, profile, exemplar):
     return blocks
 
 
-def build_brief_message(brief, archetype):
+def assets_section(assets):
+    """Available-assets block (RND-5). Volatile per brief — lives in the
+    user message, never the cached system prefix."""
+    if not assets:
+        return ("\n\n# Available image assets\n"
+                "None — do not emit any image items for this brief.")
+    lines = ["\n\n# Available image assets\n",
+             "Image items may ONLY use these names as `src` "
+             "(fit \"frame\" recommended; match the frame to the aspect "
+             "ratio):\n"]
+    for a in assets:
+        dims = (f" — {a['width']}x{a['height']}px, aspect "
+                f"{a['width'] / a['height']:.2f}"
+                if a.get("width") and a.get("height") else "")
+        lines.append(f"- {a['name']}{dims}\n")
+    return "".join(lines)
+
+
+def build_brief_message(brief, archetype, assets=None):
     parts = [
         "# Brief\n",
         json.dumps(brief, indent=2, sort_keys=True),
         "\n\n# Your layout archetype for THIS concept\n",
         archetype,
+        assets_section(assets),
         "\n\nGenerate one complete document for this brief using the "
         "emit_document tool. Distinctness comes from layout archetype, "
         "composition and hierarchy — not from straying off-brand.",

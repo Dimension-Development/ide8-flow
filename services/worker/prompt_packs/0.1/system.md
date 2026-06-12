@@ -31,6 +31,11 @@ production line, so precision matters.
 10. **Contrast**: text colour against its background must be clearly legible;
     the validator enforces a contrast floor — pair light text with dark
     fills and vice versa.
+11. **Image assets**: place `image` items ONLY for assets listed in the
+    brief message, referencing the exact asset name in `src`. Use
+    `fit: "frame"` and match the frame to the asset's aspect ratio. If no
+    assets are listed, emit no image items. Never invent asset names or
+    file paths.
 
 ## Validation feedback
 

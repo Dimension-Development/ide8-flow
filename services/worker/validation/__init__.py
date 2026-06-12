@@ -15,10 +15,11 @@ if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
 from brand import merge_profile  # noqa: E402
-from validation import brand_rules, contrast, geometry, schema_check  # noqa: E402
+from validation import (  # noqa: E402
+    assets_check, brand_rules, contrast, geometry, schema_check)
 
 
-def run_validation(document, profile, schema_path):
+def run_validation(document, profile, schema_path, asset_names=()):
     """Returns {ok, errors, warnings}. ok == no errors (warnings allowed)."""
     errors = schema_check.check(document, schema_path)
     if errors:
@@ -27,6 +28,9 @@ def run_validation(document, profile, schema_path):
     errors, warnings = [], []
 
     e = brand_rules.check(document, profile)
+    errors.extend(e)
+
+    e = assets_check.check(document, asset_names)
     errors.extend(e)
 
     merged = merge_profile(document, profile)

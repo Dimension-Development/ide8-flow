@@ -23,6 +23,7 @@ WORKER_ROOT = Path(__file__).resolve().parents[1]
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
+from assets import resolve_srcs  # noqa: E402
 from brand import merge_profile  # noqa: E402
 from validation import run_validation  # noqa: E402
 from generation import prompts  # noqa: E402
@@ -111,18 +112,25 @@ def _tool_result(tool_use_id, content, is_error=False):
 
 
 def generate_concept(brief, profile, archetype, *, client, render,
-                     pack, schema_json, schema_path, config=None):
-    """Run the full GEN-1 loop for one concept. Returns ConceptResult."""
+                     pack, schema_json, schema_path, config=None,
+                     assets=None):
+    """Run the full GEN-1 loop for one concept. Returns ConceptResult.
+
+    `assets` is {name: {name, mime, width, height, data}} — advertised to
+    the model, enforced by validation (missing-asset), staged to the render
+    service with each proof (RND-5)."""
     cfg = config or GenConfig()
     meter = Meter()
     result = ConceptResult(model_history=[])
+    assets = assets or {}
 
     system = prompts.build_system(
         pack, schema_json, profile,
         exemplar=pack.get("exemplar", {}))
     tools = [_emit_tool(schema_json), _critique_tool()]
     messages = [{"role": "user",
-                 "content": prompts.build_brief_message(brief, archetype)}]
+                 "content": prompts.build_brief_message(
+                     brief, archetype, assets=list(assets.values()))}]
 
     model = cfg.fast_model
     validation_failures = 0
@@ -154,7 +162,8 @@ def generate_concept(brief, profile, archetype, *, client, render,
         messages.append({"role": "assistant", "content": resp.content})
 
         # ---- deterministic gates (cheapest first, GEN-3 / VAL-1..4) -----
-        report = run_validation(document, profile, schema_path)
+        report = run_validation(document, profile, schema_path,
+                                asset_names=assets.keys())
         result.validation = report
         if not report["ok"]:
             validation_failures += 1
@@ -166,8 +175,9 @@ def generate_concept(brief, profile, archetype, *, client, render,
             continue
 
         merged = merge_profile(document, profile)
+        staged, files = resolve_srcs(merged, assets)
         try:
-            sla = render.compile(merged)
+            sla = render.compile(staged)
         except CompileRejected as e:
             validation_failures += 1
             messages.append({"role": "user", "content": [_tool_result(
@@ -175,7 +185,8 @@ def generate_concept(brief, profile, archetype, *, client, render,
                 is_error=True)]})
             continue
 
-        png_b64, overflows = render.proof_meta(sla, dpi=cfg.proof_dpi)
+        png_b64, overflows = render.proof_meta(sla, dpi=cfg.proof_dpi,
+                                               assets=files)
         if overflows:  # VAL-6: hard failure, deterministic, pre-vision
             validation_failures += 1
             overflow_report = {"ok": False, "errors": [

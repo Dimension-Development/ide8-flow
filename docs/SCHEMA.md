@@ -82,7 +82,7 @@ Open vector path (cut paths, creases). `{frame, d, stroke}`. Stroke colour is ty
 
 ### image
 
-`{frame, src, fit: "frame"|"free", stretch?}`. `src` must resolve on the render host; SLA references images by path, it does not embed them. (Production flow: assets staged from Supabase Storage pre-compile, PRD RND-5.)
+`{frame, src, fit: "frame"|"free", stretch?}`. `src` is an **asset name** (kebab-case, e.g. `"brand-wordmark"`) from the asset library — never a file path. The pipeline validates the name (`missing-asset` is a hard failure, RND-5), rewrites it to a staged relative path at compile time, and ships the file to the render host with each render request. SLA references images by path and does not embed them.
 
 ## Schema-scope limits (not yet modelled)
 

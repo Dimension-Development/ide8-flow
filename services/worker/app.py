@@ -22,6 +22,9 @@ from fastapi import Body, FastAPI, HTTPException, Response
 WORKER_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(WORKER_ROOT))
 
+import base64  # noqa: E402
+
+from assets import SAFE_NAME, sniff  # noqa: E402
 from brand import load_profile, merge_profile  # noqa: E402
 from generation import prompts  # noqa: E402
 from generation.loop import GenConfig  # noqa: E402
@@ -152,6 +155,42 @@ def _latest_summary(store, concept_id):
         "warnings": len(latest["validation"].get("warnings", [])),
         "cost_usd": (latest["usage"] or {}).get("cost_usd"),
     }
+
+
+@app.post("/assets")
+def upload_asset(payload: dict = Body(...)):
+    """RND-5: upload an image asset. {name, filename, data_b64}. Names are
+    write-once — versions reference assets by name."""
+    name = (payload.get("name") or "").strip().lower()
+    if not SAFE_NAME.match(name):
+        raise HTTPException(400, "name must be kebab-case: a-z, 0-9, -, _")
+    try:
+        data = base64.b64decode(payload["data_b64"])
+    except Exception:
+        raise HTTPException(400, "data_b64 missing or not valid base64")
+    mime, width, height = sniff(data)
+    if mime is None:
+        raise HTTPException(415, "unrecognised image format — PNG, JPEG or "
+                                 "TIFF only")
+    if not _deps().add_asset(name, payload.get("filename", name), mime,
+                             width, height, data):
+        raise HTTPException(409, f'asset "{name}" already exists — assets '
+                                 f"are write-once; pick a new name")
+    return {"name": name, "mime": mime, "width": width, "height": height,
+            "size": len(data)}
+
+
+@app.get("/assets")
+def assets_list():
+    return {"assets": _deps().list_assets()}
+
+
+@app.get("/assets/{name}")
+def asset_bytes(name: str):
+    a = _deps().get_asset(name)
+    if a is None:
+        raise HTTPException(404, "unknown asset")
+    return Response(content=a["data"], media_type=a["mime"])
 
 
 @app.get("/concepts")

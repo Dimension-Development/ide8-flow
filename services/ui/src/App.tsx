@@ -2,11 +2,13 @@ import { useState } from "react";
 import ConceptGrid from "./components/ConceptGrid";
 import ConceptDetail from "./components/ConceptDetail";
 import BriefForm from "./components/BriefForm";
+import AssetsView from "./components/AssetsView";
 
 type View =
   | { kind: "grid" }
   | { kind: "concept"; id: string }
-  | { kind: "brief" };
+  | { kind: "brief" }
+  | { kind: "assets" };
 
 export default function App() {
   const [view, setView] = useState<View>({ kind: "grid" });
@@ -26,15 +28,23 @@ export default function App() {
             proof grid — M2 internal preview
           </span>
           <button
+            onClick={() => setView({ kind: "assets" })}
+            className="ml-auto text-sm font-semibold text-ink-soft transition hover:text-ink"
+          >
+            Assets
+          </button>
+          <button
             onClick={() => setView({ kind: "brief" })}
-            className="ml-auto rounded-lg bg-ink px-3 py-1.5 text-sm font-semibold text-cream transition hover:bg-ink-soft"
+            className="rounded-lg bg-ink px-3 py-1.5 text-sm font-semibold text-cream transition hover:bg-ink-soft"
           >
             + New brief
           </button>
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-6 py-8">
-        {view.kind === "brief" ? (
+        {view.kind === "assets" ? (
+          <AssetsView />
+        ) : view.kind === "brief" ? (
           <BriefForm
             onStarted={(jobId) => {
               setActiveJobId(jobId);

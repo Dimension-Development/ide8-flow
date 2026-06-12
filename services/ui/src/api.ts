@@ -85,6 +85,16 @@ export interface Job {
 
 export type EnginePreset = "draft" | "standard" | "premium";
 
+export interface Asset {
+  name: string;
+  filename: string;
+  mime: string;
+  width: number | null;
+  height: number | null;
+  size: number;
+  created_at: string;
+}
+
 export const api = {
   generate: (brief: Brief, n: number, engine: EnginePreset) =>
     fetch("/api/generate", {
@@ -93,6 +103,15 @@ export const api = {
       body: JSON.stringify({ brief, n, engine }),
     }).then((r) => j<{ job_id: string }>(r)),
   job: (id: string) => fetch(`/api/jobs/${id}`).then((r) => j<Job>(r)),
+  assets: () =>
+    fetch("/api/assets").then((r) => j<{ assets: Asset[] }>(r)),
+  uploadAsset: (name: string, filename: string, dataB64: string) =>
+    fetch("/api/assets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, filename, data_b64: dataB64 }),
+    }).then((r) => j<Asset>(r)),
+  assetUrl: (name: string) => `/api/assets/${name}`,
   slaUrl: (versionId: string) => `/api/versions/${versionId}/document.sla`,
   documentUrl: (versionId: string) =>
     `/api/versions/${versionId}/document.json`,
