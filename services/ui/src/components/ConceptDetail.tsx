@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   api,
+  type Comment,
   type ConceptDetail as Detail,
   type MutationResponse,
   type Version,
@@ -92,6 +93,11 @@ export default function ConceptDetail({
               setSelectedId(m.version_id);
               load();
             }}
+          />
+          <CommentThread
+            conceptId={conceptId}
+            selectedVersionId={selectedId}
+            versions={detail.versions}
           />
           <VersionTimeline
             versions={detail.versions}
@@ -239,28 +245,169 @@ function VersionTimeline({
                   : "border-ink/10 hover:border-ink/30"
               }`}
             >
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-xs text-ink-soft">
-                  v{versions.length - i}
-                </span>
-                <ApprovalBadge approved={v.approved} />
-                <OriginBadge origin={v.origin} />
-                <span className="ml-auto">
-                  <Cost usd={v.usage?.cost_usd} />
-                </span>
+              <div className="flex gap-3">
+                {v.has_proof && (
+                  <img
+                    src={api.proofUrl(v.id)}
+                    alt=""
+                    loading="lazy"
+                    className="h-16 w-16 shrink-0 rounded border border-ink/10 bg-paper object-contain"
+                  />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-ink-soft">
+                      v{versions.length - i}
+                    </span>
+                    <ApprovalBadge approved={v.approved} />
+                    <OriginBadge origin={v.origin} />
+                    <span className="ml-auto">
+                      <Cost usd={v.usage?.cost_usd} />
+                    </span>
+                  </div>
+                  {v.mutation_instruction && (
+                    <p className="mt-1 line-clamp-2 text-xs italic text-ink-soft">
+                      “{v.mutation_instruction}”
+                    </p>
+                  )}
+                  <p className="mt-1 font-mono text-[10px] text-ink-soft/70">
+                    {v.content_hash.slice(0, 16)} · {v.created_at}
+                  </p>
+                </div>
               </div>
-              {v.mutation_instruction && (
-                <p className="mt-1 line-clamp-2 text-xs italic text-ink-soft">
-                  “{v.mutation_instruction}”
-                </p>
-              )}
-              <p className="mt-1 font-mono text-[10px] text-ink-soft/70">
-                {v.content_hash.slice(0, 16)} · {v.created_at}
-              </p>
             </button>
           </li>
         ))}
       </ol>
+    </div>
+  );
+}
+
+function CommentThread({
+  conceptId,
+  selectedVersionId,
+  versions,
+}: {
+  conceptId: string;
+  selectedVersionId: string | null;
+  versions: Version[];
+}) {
+  // REV-3 (Phase 1): per-concept comment threads on the SQLite store. No
+  // realtime layer yet (Liveblocks deferred until AUTH lands) — comments are
+  // persisted and polled-on-action so the realtime tier is a drop-in later.
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = () =>
+    api.comments(conceptId).then((r) => setComments(r.comments));
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conceptId]);
+
+  const versionLabel = (id: string | null) => {
+    if (!id) return null;
+    const idx = versions.findIndex((v) => v.id === id);
+    return idx >= 0 ? `v${idx + 1}` : null;
+  };
+
+  const submit = async () => {
+    if (!body.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.addComment(conceptId, body.trim(), selectedVersionId);
+      setBody("");
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggle = async (c: Comment) => {
+    await api.resolveComment(c.id, !c.resolved);
+    load();
+  };
+
+  const open = comments.filter((c) => !c.resolved).length;
+  const selectedLabel = versionLabel(selectedVersionId);
+
+  return (
+    <div className="rounded-xl border border-ink/10 bg-paper p-4 shadow-sm">
+      <h2 className="mb-3 font-semibold">
+        Comments
+        {comments.length > 0 && (
+          <span className="ml-2 text-xs font-normal text-ink-soft">
+            {open} open · {comments.length} total
+          </span>
+        )}
+      </h2>
+      <ul className="mb-3 space-y-2">
+        {comments.length === 0 && (
+          <li className="text-xs text-ink-soft">No comments yet.</li>
+        )}
+        {comments.map((c) => {
+          const label = versionLabel(c.version_id);
+          return (
+            <li
+              key={c.id}
+              className={`rounded-lg border border-ink/10 p-2 text-sm ${
+                c.resolved ? "opacity-60" : ""
+              }`}
+            >
+              <div className="flex items-center gap-2 text-xs text-ink-soft">
+                <span className="font-semibold text-ink">{c.author}</span>
+                {label && (
+                  <span className="rounded bg-ink/5 px-1 font-mono text-[10px]">
+                    on {label}
+                  </span>
+                )}
+                <button
+                  onClick={() => toggle(c)}
+                  className="ml-auto text-ink-soft hover:text-ink"
+                >
+                  {c.resolved ? "reopen" : "resolve"}
+                </button>
+              </div>
+              <p
+                className={`mt-1 whitespace-pre-wrap text-ink ${
+                  c.resolved ? "line-through" : ""
+                }`}
+              >
+                {c.body}
+              </p>
+              <p className="mt-1 font-mono text-[10px] text-ink-soft/70">
+                {c.created_at}
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+      <textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        rows={2}
+        placeholder="Leave a comment…"
+        className="w-full rounded-lg border border-ink/15 bg-white p-2 text-sm outline-none focus:border-brand"
+        disabled={busy}
+      />
+      <button
+        onClick={submit}
+        disabled={busy || !body.trim()}
+        className="mt-2 w-full rounded-lg border border-ink/15 bg-paper px-4 py-2 text-sm font-semibold text-ink transition hover:border-ink/40 disabled:opacity-40"
+      >
+        {busy
+          ? "Posting…"
+          : selectedLabel
+            ? `Comment on ${selectedLabel}`
+            : "Comment"}
+      </button>
+      {error && <p className="mt-2 text-xs text-brand">{error}</p>}
     </div>
   );
 }

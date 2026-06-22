@@ -1,0 +1,223 @@
+[
+  {
+    "name": "harvest-hero",
+    "file": "assets/harvest-hero.jpg",
+    "format": "JPEG",
+    "mode": "RGB",
+    "size": [
+      1600,
+      1200
+    ],
+    "bytes": 63082,
+    "expect": "accepted",
+    "note": "Editorial food hero, RGB."
+  },
+  {
+    "name": "harvest-lifestyle",
+    "file": "assets/harvest-lifestyle.png",
+    "format": "PNG",
+    "mode": "RGB",
+    "size": [
+      1800,
+      1200
+    ],
+    "bytes": 24715,
+    "expect": "accepted",
+    "note": "Lifestyle scene, RGB PNG."
+  },
+  {
+    "name": "kraft-texture",
+    "file": "assets/kraft-texture.jpg",
+    "format": "JPEG",
+    "mode": "RGB",
+    "size": [
+      1200,
+      1200
+    ],
+    "bytes": 64976,
+    "expect": "accepted",
+    "note": "Background texture, RGB."
+  },
+  {
+    "name": "meridian-logo",
+    "file": "assets/meridian-logo.png",
+    "format": "PNG",
+    "mode": "RGBA",
+    "size": [
+      1100,
+      460
+    ],
+    "bytes": 15347,
+    "expect": "accepted",
+    "note": "Primary lockup, alpha."
+  },
+  {
+    "name": "meridian-logo-reversed",
+    "file": "assets/meridian-logo-reversed.png",
+    "format": "PNG",
+    "mode": "RGBA",
+    "size": [
+      1100,
+      460
+    ],
+    "bytes": 15449,
+    "expect": "accepted",
+    "note": "Reversed lockup for dark grounds, alpha."
+  },
+  {
+    "name": "meridian-mark",
+    "file": "assets/meridian-mark.png",
+    "format": "PNG",
+    "mode": "RGBA",
+    "size": [
+      512,
+      512
+    ],
+    "bytes": 3730,
+    "expect": "accepted",
+    "note": "Symbol only, square, alpha."
+  },
+  {
+    "name": "harvest-recipe-qr",
+    "file": "assets/harvest-recipe-qr.png",
+    "format": "PNG",
+    "mode": "RGB",
+    "size": [
+      630,
+      630
+    ],
+    "bytes": 3421,
+    "expect": "accepted",
+    "note": "QR-shaped fixture."
+  },
+  {
+    "name": "leaf-icon",
+    "file": "assets/leaf-icon.png",
+    "format": "PNG",
+    "mode": "RGBA",
+    "size": [
+      256,
+      256
+    ],
+    "bytes": 1717,
+    "expect": "accepted",
+    "note": "Single icon, alpha."
+  },
+  {
+    "name": "allergen-icons",
+    "file": "assets/allergen-icons.png",
+    "format": "PNG",
+    "mode": "RGBA",
+    "size": [
+      1000,
+      200
+    ],
+    "bytes": 10449,
+    "expect": "accepted",
+    "note": "Composite allergen row, wide, alpha."
+  },
+  {
+    "name": "meridian-plus-badge",
+    "file": "assets/meridian-plus-badge.png",
+    "format": "PNG",
+    "mode": "RGBA",
+    "size": [
+      420,
+      420
+    ],
+    "bytes": 9301,
+    "expect": "accepted",
+    "note": "Member badge, alpha."
+  },
+  {
+    "name": "harvest-hero-cmyk",
+    "file": "assets/edge-cases/harvest-hero-cmyk.tif",
+    "format": "TIFF",
+    "mode": "CMYK",
+    "size": [
+      1600,
+      1200
+    ],
+    "bytes": 7680142,
+    "expect": "accepted-but-no-dims",
+    "note": "CMYK TIFF: sniff() returns mime but width/height None (no IFD walk). Print-correct colour, but UI shows no dims and browsers can't preview CMYK TIFF."
+  },
+  {
+    "name": "harvest-hero-cmyk",
+    "file": "assets/edge-cases/harvest-hero-cmyk.jpg",
+    "format": "JPEG",
+    "mode": "CMYK",
+    "size": [
+      1600,
+      1200
+    ],
+    "bytes": 163495,
+    "expect": "accepted-but-may-preview-wrong",
+    "note": "CMYK JPEG: accepted (mime+dims read), but many browsers render Adobe CMYK JPEGs with inverted colour in <img>."
+  },
+  {
+    "name": "oversized-banner",
+    "file": "assets/edge-cases/oversized-banner.jpg",
+    "format": "JPEG",
+    "mode": "RGB",
+    "size": [
+      5000,
+      3500
+    ],
+    "bytes": 274817,
+    "expect": "accepted-no-size-guard",
+    "note": "5000\u00d73500 \u2014 no max-dimension or byte-size guard on upload."
+  },
+  {
+    "name": "tiny-icon",
+    "file": "assets/edge-cases/tiny-icon.png",
+    "format": "PNG",
+    "mode": "RGB",
+    "size": [
+      16,
+      16
+    ],
+    "bytes": 299,
+    "expect": "accepted-tiny",
+    "note": "16\u00d716 \u2014 will be scaled up into any real frame; no min-size or DPI check."
+  },
+  {
+    "name": "extreme-aspect",
+    "file": "assets/edge-cases/extreme-aspect.png",
+    "format": "PNG",
+    "mode": "RGB",
+    "size": [
+      3000,
+      80
+    ],
+    "bytes": 982,
+    "expect": "accepted-extreme-aspect",
+    "note": "37.5:1 strip \u2014 aspect ratio is reported but never validated against the placing frame."
+  },
+  {
+    "name": "animated-unsupported",
+    "file": "assets/edge-cases/animated-unsupported.gif",
+    "format": "GIF",
+    "mode": "RGB",
+    "size": [
+      630,
+      630
+    ],
+    "bytes": 10004,
+    "expect": "rejected-415",
+    "note": "GIF is not sniffed \u2192 upload returns 415 unrecognised format."
+  },
+  {
+    "name": "meridian-logo",
+    "file": "assets/edge-cases/meridian-logo.svg",
+    "format": "SVG",
+    "mode": "vector",
+    "size": [
+      1100,
+      460
+    ],
+    "bytes": 700,
+    "expect": "rejected-415",
+    "note": "The authoritative VECTOR logo master. SVG/EPS/PDF vector uploads are not supported at all \u2014 the headline gap. Vector logos must currently be hand-rebuilt as native shape/path items or flattened to PNG, losing scalability."
+  }
+]

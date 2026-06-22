@@ -1,5 +1,11 @@
-import { useState } from "react";
-import { api, type Brief, type EnginePreset } from "../api";
+import { useEffect, useState } from "react";
+import {
+  api,
+  type Asset,
+  type Brief,
+  type BrandSummary,
+  type EnginePreset,
+} from "../api";
 
 const SIZES = ["A4", "A3", "A2", "A1", "A5", "SRA3"];
 
@@ -8,6 +14,15 @@ const ENGINES: { value: EnginePreset; label: string }[] = [
   { value: "standard", label: "Standard — Sonnet, Opus escalation" },
   { value: "premium", label: "Premium — Opus throughout" },
 ];
+
+const DEFAULT_BRAND = "Example Brand";
+
+function parseMargins(s: string): number[] {
+  const parts = s.split(",").map((x) => Number(x.trim()));
+  if (parts.length === 4 && parts.every((n) => Number.isFinite(n) && n >= 0))
+    return parts;
+  return [12, 12, 12, 12];
+}
 
 export default function BriefForm({
   onStarted,
@@ -23,22 +38,47 @@ export default function BriefForm({
   const [notes, setNotes] = useState("");
   const [size, setSize] = useState("A4");
   const [orientation, setOrientation] = useState("portrait");
+  const [bleed, setBleed] = useState(8.5);
+  const [margins, setMargins] = useState("12, 12, 12, 12");
+  const [mandatory, setMandatory] = useState("");
+  const [refs, setRefs] = useState<string[]>([]);
   const [n, setN] = useState(6);
   const [engine, setEngine] = useState<EnginePreset>("standard");
+  const [brand, setBrand] = useState(DEFAULT_BRAND);
+  const [brands, setBrands] = useState<BrandSummary[]>([]);
+  const [assets, setAssets] = useState<Asset[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .brands()
+      .then((d) => {
+        setBrands(d.brands);
+        if (d.brands.length > 0) setBrand(d.brands[0].name);
+        else if (d.default) setBrand(d.default);
+      })
+      .catch(() => {});
+    api
+      .assets()
+      .then((d) => setAssets(d.assets))
+      .catch(() => {});
+  }, []);
+
+  const toggleRef = (name: string) =>
+    setRefs((r) => (r.includes(name) ? r.filter((x) => x !== name) : [...r, name]));
 
   const submit = async () => {
     setBusy(true);
     setError(null);
     const brief: Brief = {
       title: title.trim() || "Untitled brief",
-      brand: "Example Brand",
+      brand,
       format: {
         size,
         orientation,
-        bleed: 8.5,
-        margins: [12, 12, 12, 12],
+        bleed,
+        margins: parseMargins(margins),
       },
       copy: {
         headline: headline.trim(),
@@ -49,9 +89,13 @@ export default function BriefForm({
           .filter(Boolean),
         legal: legal.trim() || null,
       },
-      mandatoryElements: [],
+      mandatoryElements: mandatory
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
       tone: tone.trim(),
       notes: notes.trim(),
+      references: { imageAssets: refs },
     };
     try {
       const { job_id } = await api.generate(brief, n, engine);
@@ -81,6 +125,30 @@ export default function BriefForm({
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Autumn Warmers — Aisle Fin Set" />
         </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={label}>Brand profile</label>
+            <select className={field} value={brand}
+              onChange={(e) => setBrand(e.target.value)}>
+              {brands.length === 0 && <option>{DEFAULT_BRAND}</option>}
+              {brands.map((b) => (
+                <option key={b.name} value={b.name}>
+                  {b.name}
+                  {b.version ? ` (v${b.version})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={label}>Engine</label>
+            <select className={field} value={engine}
+              onChange={(e) => setEngine(e.target.value as EnginePreset)}>
+              {ENGINES.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
         <div className="grid grid-cols-3 gap-4">
           <div>
             <label className={label}>Format</label>
@@ -105,19 +173,17 @@ export default function BriefForm({
             </select>
           </div>
         </div>
-        <div>
-          <label className={label}>Engine</label>
-          <select
-            className={field}
-            value={engine}
-            onChange={(e) => setEngine(e.target.value as EnginePreset)}
-          >
-            {ENGINES.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={label}>Bleed (pt)</label>
+            <input type="number" step="0.5" className={field} value={bleed}
+              onChange={(e) => setBleed(Number(e.target.value))} />
+          </div>
+          <div>
+            <label className={label}>Margins L,R,T,B (pt)</label>
+            <input className={field} value={margins}
+              onChange={(e) => setMargins(e.target.value)} />
+          </div>
         </div>
         <div>
           <label className={label}>Headline *</label>
@@ -141,6 +207,41 @@ export default function BriefForm({
           <input className={field} value={legal}
             onChange={(e) => setLegal(e.target.value)}
             placeholder="optional — reproduced verbatim" />
+        </div>
+        <div>
+          <label className={label}>Mandatory elements (comma-separated item names)</label>
+          <input className={field} value={mandatory}
+            onChange={(e) => setMandatory(e.target.value)}
+            placeholder="meridian-logo, legal-line, harvest-recipe-qr" />
+          <p className="mt-1 text-xs text-ink-soft">
+            Each becomes a hard requirement — every concept must include a
+            named item matching it.
+          </p>
+        </div>
+        <div>
+          <label className={label}>Reference assets</label>
+          {assets.length === 0 ? (
+            <p className="text-xs text-ink-soft">
+              No assets uploaded yet — add some under Assets.
+            </p>
+          ) : (
+            <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto rounded-lg border border-ink/10 p-2">
+              {assets.map((a) => (
+                <button
+                  key={a.name}
+                  type="button"
+                  onClick={() => toggleRef(a.name)}
+                  className={`rounded-full border px-2 py-0.5 text-xs transition ${
+                    refs.includes(a.name)
+                      ? "border-brand bg-brand text-white"
+                      : "border-ink/20 text-ink-soft hover:border-ink/40"
+                  }`}
+                >
+                  {a.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div>
           <label className={label}>Tone / direction</label>

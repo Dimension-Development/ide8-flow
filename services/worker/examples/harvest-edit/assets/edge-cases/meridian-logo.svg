@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 460" role="img"
+     aria-label="Meridian Market">
+  <g fill="none">
+    <circle cx="550" cy="150" r="110" fill="#AC6739"/>
+    <line x1="385" y1="150" x2="715" y2="150" stroke="#3F1C5B"
+          stroke-width="12"/>
+    <path d="M451 150 A110 110 0 0 0 649 150 Z" fill="#CE4623"/>
+  </g>
+  <text x="550" y="345" text-anchor="middle" font-family="Canela Deck, serif"
+        font-weight="600" font-size="150" fill="#3F1C5B">MERIDIAN</text>
+  <text x="550" y="410" text-anchor="middle" font-family="Söhne, sans-serif"
+        letter-spacing="14" font-size="40" fill="#AC6739">· MARKET ·</text>
+</svg>

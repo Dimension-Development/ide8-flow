@@ -16,11 +16,26 @@ if str(WORKER_ROOT) not in sys.path:
 
 from brand import merge_profile  # noqa: E402
 from validation import (  # noqa: E402
-    assets_check, brand_rules, contrast, geometry, schema_check)
+    assets_check, brand_rules, brief_checks, contrast, geometry, schema_check)
 
 
-def run_validation(document, profile, schema_path, asset_names=()):
-    """Returns {ok, errors, warnings}. ok == no errors (warnings allowed)."""
+def _dedupe(items):
+    seen, out = set(), []
+    for it in items:
+        key = (it.get("code"), it.get("path"), it.get("message"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(it)
+    return out
+
+
+def run_validation(document, profile, schema_path, asset_names=(), brief=None):
+    """Returns {ok, errors, warnings}. ok == no errors (warnings allowed).
+
+    `brief`, when supplied (generation), enables brief-derived checks: VAL-5
+    copy integrity and brief-level mandatory elements. Mutations pass no brief.
+    """
     errors = schema_check.check(document, schema_path)
     if errors:
         return {"ok": False, "errors": errors, "warnings": []}
@@ -42,4 +57,10 @@ def run_validation(document, profile, schema_path, asset_names=()):
     e = contrast.check(merged, profile)
     errors.extend(e)
 
-    return {"ok": not errors, "errors": errors, "warnings": warnings}
+    if brief is not None:
+        e, w = brief_checks.check(document, brief)
+        errors.extend(e)
+        warnings.extend(w)
+
+    return {"ok": not errors, "errors": _dedupe(errors),
+            "warnings": _dedupe(warnings)}

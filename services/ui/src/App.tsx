@@ -3,12 +3,16 @@ import ConceptGrid from "./components/ConceptGrid";
 import ConceptDetail from "./components/ConceptDetail";
 import BriefForm from "./components/BriefForm";
 import AssetsView from "./components/AssetsView";
+import BrandsView from "./components/BrandsView";
+import Dashboard from "./components/Dashboard";
 
 type View =
   | { kind: "grid" }
   | { kind: "concept"; id: string }
   | { kind: "brief" }
-  | { kind: "assets" };
+  | { kind: "assets" }
+  | { kind: "brands" }
+  | { kind: "stats" };
 
 export default function App() {
   const [view, setView] = useState<View>({ kind: "grid" });
@@ -28,10 +32,22 @@ export default function App() {
             proof grid — M2 internal preview
           </span>
           <button
-            onClick={() => setView({ kind: "assets" })}
+            onClick={() => setView({ kind: "stats" })}
             className="ml-auto text-sm font-semibold text-ink-soft transition hover:text-ink"
           >
+            Usage
+          </button>
+          <button
+            onClick={() => setView({ kind: "assets" })}
+            className="text-sm font-semibold text-ink-soft transition hover:text-ink"
+          >
             Assets
+          </button>
+          <button
+            onClick={() => setView({ kind: "brands" })}
+            className="text-sm font-semibold text-ink-soft transition hover:text-ink"
+          >
+            Brands
           </button>
           <button
             onClick={() => setView({ kind: "brief" })}
@@ -42,8 +58,12 @@ export default function App() {
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-6 py-8">
-        {view.kind === "assets" ? (
+        {view.kind === "stats" ? (
+          <Dashboard />
+        ) : view.kind === "assets" ? (
           <AssetsView />
+        ) : view.kind === "brands" ? (
+          <BrandsView />
         ) : view.kind === "brief" ? (
           <BriefForm
             onStarted={(jobId) => {

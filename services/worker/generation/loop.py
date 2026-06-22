@@ -163,7 +163,7 @@ def generate_concept(brief, profile, archetype, *, client, render,
 
         # ---- deterministic gates (cheapest first, GEN-3 / VAL-1..4) -----
         report = run_validation(document, profile, schema_path,
-                                asset_names=assets.keys())
+                                asset_names=assets.keys(), brief=brief)
         result.validation = report
         if not report["ok"]:
             validation_failures += 1

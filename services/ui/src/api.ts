@@ -50,6 +50,47 @@ export interface MutationResponse {
   cost_usd: number | null;
 }
 
+export interface Comment {
+  id: string;
+  concept_id: string;
+  version_id: string | null;
+  anchor_name: string | null;
+  author: string;
+  body: string;
+  resolved: boolean;
+  created_at: string;
+}
+
+export interface Stats {
+  scope: "global" | "job";
+  job_id: string | null;
+  concepts: number;
+  versions: number;
+  versions_by_origin: Record<string, number>;
+  approved_versions: number;
+  llm_calls: number;
+  cost_usd_total: number;
+  tokens: {
+    input: number;
+    output: number;
+    cache_read: number;
+    cache_creation: number;
+  };
+  cost_by_model: {
+    model: string;
+    calls: number;
+    input_tokens: number;
+    output_tokens: number;
+    cost_usd: number;
+    priced: boolean;
+  }[];
+  validation: {
+    versions_with_errors: number;
+    errors_by_code: Record<string, number>;
+    warnings_by_code: Record<string, number>;
+  };
+}
+
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r.json() as Promise<T>;
@@ -73,6 +114,36 @@ export interface Brief {
   mandatoryElements: string[];
   tone: string;
   notes: string;
+  references?: { imageAssets: string[] };
+}
+
+export interface Swatch {
+  name: string;
+  space: "cmyk" | "rgb";
+  values: number[];
+  spot?: boolean;
+}
+
+export interface BrandSummary {
+  name: string;
+  version: string | null;
+  swatches: Swatch[];
+  fonts: string[];
+  rules: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BrandProfile {
+  name: string;
+  profile: {
+    name: string;
+    version?: string;
+    swatches: Swatch[];
+    fonts: string[];
+    rules?: Record<string, unknown>;
+    [k: string]: unknown;
+  };
 }
 
 export interface Job {
@@ -103,6 +174,25 @@ export const api = {
       body: JSON.stringify({ brief, n, engine }),
     }).then((r) => j<{ job_id: string }>(r)),
   job: (id: string) => fetch(`/api/jobs/${id}`).then((r) => j<Job>(r)),
+  stats: () => fetch("/api/stats").then((r) => j<Stats>(r)),
+  brands: () =>
+    fetch("/api/brands").then((r) =>
+      j<{ brands: BrandSummary[]; default: string }>(r),
+    ),
+  brand: (name: string) =>
+    fetch(`/api/brands/${encodeURIComponent(name)}`).then((r) =>
+      j<BrandProfile>(r),
+    ),
+  saveBrand: (profile: Record<string, unknown>) =>
+    fetch("/api/brands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(profile),
+    }).then((r) => j<BrandProfile>(r)),
+  deleteBrand: (name: string) =>
+    fetch(`/api/brands/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }).then(j),
   assets: () =>
     fetch("/api/assets").then((r) => j<{ assets: Asset[] }>(r)),
   uploadAsset: (name: string, filename: string, dataB64: string) =>
@@ -132,4 +222,18 @@ export const api = {
       body: JSON.stringify({ instruction }),
     }).then((r) => j<MutationResponse>(r)),
   proofUrl: (versionId: string) => `/api/versions/${versionId}/proof.png`,
+  comments: (conceptId: string) =>
+    fetch(`/api/concepts/${conceptId}/comments`).then((r) =>
+      j<{ comments: Comment[] }>(r),
+    ),
+  addComment: (conceptId: string, body: string, versionId?: string | null) =>
+    fetch(`/api/concepts/${conceptId}/comments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body, version_id: versionId ?? null }),
+    }).then((r) => j<Comment>(r)),
+  resolveComment: (commentId: string, resolved: boolean) =>
+    fetch(`/api/comments/${commentId}/${resolved ? "resolve" : "reopen"}`, {
+      method: "POST",
+    }).then(j),
 };
