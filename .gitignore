@@ -11,9 +11,15 @@ __pycache__/
 
 # local compiler output (committed golden fixtures live under tests/golden/)
 services/render/out.*
+# regenerable, non-byte-stable PDF render output (out.sla is the golden, not the PDF)
+services/render/tests/golden/out.pdf
 
 # worker local store + generation output
 services/worker/data/
 out/
 node_modules/
 services/ui/dist/
+
+# heavyweight regenerable fixture binary (CMYK TIFF, ~7MB) — recreate with
+# services/worker/examples/harvest-edit/gen_assets.py
+services/worker/examples/harvest-edit/assets/edge-cases/*.tif

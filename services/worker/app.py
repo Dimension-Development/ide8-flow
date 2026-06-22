@@ -16,6 +16,7 @@ import os
 import sys
 import threading
 from pathlib import Path
+from typing import Optional
 
 from fastapi import Body, FastAPI, HTTPException, Response
 
@@ -28,6 +29,7 @@ from assets import SAFE_NAME, sniff  # noqa: E402
 from brand import load_profile, merge_profile  # noqa: E402
 from generation import prompts  # noqa: E402
 from generation.loop import GenConfig  # noqa: E402
+from generation.metering import assert_all_priced  # noqa: E402
 from generation.render_client import RenderClient  # noqa: E402
 from generation.service import generate_and_store, mutate_and_store  # noqa: E402
 from store import DocStore  # noqa: E402
@@ -50,6 +52,41 @@ def _deps():
     return _state["store"]
 
 
+def _default_profile():
+    """The env-configured fallback profile (no API key needed to load it).
+    Used when a brief names no stored brand, or names one that doesn't exist."""
+    if "profile" not in _state:
+        _state["profile"] = load_profile(
+            os.environ.get("BRAND_PROFILE",
+                           str(WORKER_ROOT / "examples"
+                               / "brand_profile.json")))
+    return _state["profile"]
+
+
+def _resolve_profile(brand_name):
+    """BRAND-3: resolve the brand profile a brief should compile against.
+
+    Prefers a profile stored under brief.brand; falls back to the env default.
+    (Pinning the exact profile version a stored doc_version used is BRAND-4 —
+    today mutate/.sla recompile against whatever the brand currently is.)
+    """
+    if brand_name:
+        rec = _deps().get_brand_profile(brand_name)
+        if rec is not None:
+            return rec["profile"]
+    return _default_profile()
+
+
+def _brand_for_version(store, version):
+    """The brand name recorded on a version's concept brief, if any. Used so
+    mutate/.sla recompile against the same profile the concept was briefed
+    with (best-effort; see BRAND-4)."""
+    if not version:
+        return None
+    concept = store.get_concept(version["concept_id"])
+    return ((concept or {}).get("brief") or {}).get("brand")
+
+
 def _gen_deps():
     store = _deps()
     if "pack" not in _state:
@@ -61,10 +98,7 @@ def _gen_deps():
         _state.update({
             "pack": pack,
             "schema_json": json.loads(Path(SCHEMA_PATH).read_text()),
-            "profile": load_profile(
-                os.environ.get("BRAND_PROFILE",
-                               str(WORKER_ROOT / "examples"
-                                   / "brand_profile.json"))),
+            "profile": _default_profile(),
             # generous retries: 429s during fan-out bursts resolve within
             # the minute window; the SDK honours retry-after with backoff
             "client": anthropic.Anthropic(max_retries=6),
@@ -88,6 +122,12 @@ MODEL_PRESETS = {
     "premium": ("claude-opus-4-8", "claude-opus-4-8"),
 }
 
+# Fail fast on drift: every routed model must be priced in metering, else
+# cost_usd would mis-bill the generation against the £2/brief NFR (GEN-5).
+assert_all_priced(
+    {m for pair in MODEL_PRESETS.values() for m in pair},
+    context="MODEL_PRESETS")
+
 
 def resolve_preset(name):
     if name not in MODEL_PRESETS:
@@ -98,14 +138,14 @@ def resolve_preset(name):
     return GenConfig(fast_model=fast, strong_model=strong)
 
 
-def _run_job(job_id, brief, n, config):
+def _run_job(job_id, brief, n, config, profile):
     store, s = _gen_deps()
     store.set_job_status(job_id, "running")
     try:
         generate_and_store(
             brief, n=n, store=store, client=s["client"], render=s["render"],
             pack=s["pack"], schema_json=s["schema_json"],
-            schema_path=SCHEMA_PATH, profile=s["profile"],
+            schema_path=SCHEMA_PATH, profile=profile,
             config=config, job_id=job_id)
         store.set_job_status(job_id, "done", finished=True)
     except Exception as e:  # noqa: BLE001 — job must always reach a terminal state
@@ -123,10 +163,12 @@ def generate(payload: dict = Body(...)):
     n = max(1, min(int(payload.get("n", 6)), 8))
     config = resolve_preset(payload.get("engine", "standard"))
     store, _ = _gen_deps()  # construct deps eagerly: fail in-request, not in-thread
+    profile = _resolve_profile(brief.get("brand"))
     job_id = store.create_job(brief, n)
-    threading.Thread(target=_run_job, args=(job_id, brief, n, config),
+    threading.Thread(target=_run_job, args=(job_id, brief, n, config, profile),
                      daemon=True).start()
     return {"job_id": job_id, "status": "queued", "n": n,
+            "brand": profile.get("name"),
             "models": {"fast": config.fast_model,
                        "strong": config.strong_model}}
 
@@ -157,6 +199,13 @@ def _latest_summary(store, concept_id):
     }
 
 
+# RND-5 upload guards (gap D4): keep the version-store BLOBs lean and render-
+# host staging fast. Configurable; the dimension cap only applies to formats
+# that expose dimensions (TIFF dims aren't sniffed — gap D2).
+MAX_ASSET_BYTES = int(os.environ.get("ASSET_MAX_BYTES", 16 * 1024 * 1024))
+MAX_ASSET_DIM = int(os.environ.get("ASSET_MAX_DIM", 4096))
+
+
 @app.post("/assets")
 def upload_asset(payload: dict = Body(...)):
     """RND-5: upload an image asset. {name, filename, data_b64}. Names are
@@ -172,6 +221,12 @@ def upload_asset(payload: dict = Body(...)):
     if mime is None:
         raise HTTPException(415, "unrecognised image format — PNG, JPEG or "
                                  "TIFF only")
+    if len(data) > MAX_ASSET_BYTES:
+        raise HTTPException(413, f"asset is {len(data) // 1024} KB — over the "
+                                 f"{MAX_ASSET_BYTES // (1024 * 1024)} MB limit")
+    if width and height and max(width, height) > MAX_ASSET_DIM:
+        raise HTTPException(413, f"{width}x{height}px exceeds the "
+                                 f"{MAX_ASSET_DIM}px max-dimension limit")
     if not _deps().add_asset(name, payload.get("filename", name), mime,
                              width, height, data):
         raise HTTPException(409, f'asset "{name}" already exists — assets '
@@ -193,12 +248,56 @@ def asset_bytes(name: str):
     return Response(content=a["data"], media_type=a["mime"])
 
 
+@app.get("/brands")
+def brands_list():
+    """BRAND-3: profiles for the admin grid + brief picker (summaries)."""
+    return {"brands": _deps().list_brand_profiles(),
+            "default": _default_profile().get("name")}
+
+
+@app.post("/brands")
+def brand_save(payload: dict = Body(...)):
+    """Create or update a brand profile. Accepts either {name, profile} or a
+    bare profile object. Mutable (BRAND-4 pinning is future work)."""
+    profile = payload.get("profile") if isinstance(
+        payload.get("profile"), dict) else payload
+    name = (payload.get("name") or profile.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "brand profile needs a 'name'")
+    if not isinstance(profile.get("swatches"), list):
+        raise HTTPException(400, "profile needs a 'swatches' array")
+    profile = {**profile, "name": name}  # keep name canonical for lookups
+    return _deps().save_brand_profile(name, profile)
+
+
+@app.get("/brands/{name}")
+def brand_get(name: str):
+    rec = _deps().get_brand_profile(name)
+    if rec is None:
+        raise HTTPException(404, "unknown brand profile")
+    return rec
+
+
+@app.delete("/brands/{name}")
+def brand_delete(name: str):
+    if not _deps().delete_brand_profile(name):
+        raise HTTPException(404, "unknown brand profile")
+    return {"ok": True}
+
+
 @app.get("/concepts")
 def concepts(include_discarded: bool = False):
     store = _deps()
     return {"concepts": [
         {**c, "latest": _latest_summary(store, c["id"])}
         for c in store.list_concepts(include_discarded=include_discarded)]}
+
+
+@app.get("/stats")
+def stats(job_id: Optional[str] = None):
+    """ADM-1 v1: usage + validation rollups, global or per-job. Read-only
+    aggregation over the persisted doc_version provenance."""
+    return _deps().usage_stats(job_id=job_id)
 
 
 @app.post("/concepts/{concept_id}/discard")
@@ -222,6 +321,56 @@ def concept(concept_id: str):
         raise HTTPException(404, "unknown concept")
     c["versions"] = _deps().list_versions(concept_id)
     return c
+
+
+# REV-3: per-concept comment threads. No identity yet (AUTH-1/3 unbuilt), so
+# comments are authored as a single internal stub user until SSO lands;
+# override with INTERNAL_USER. Client-authored text is data, never an
+# instruction — it is stored verbatim and never fed to the model. Promoting a
+# comment to a mutation is a separate, explicit internal action (the GEN-9
+# prompt-injection boundary, PRD §8).
+INTERNAL_USER = os.environ.get("INTERNAL_USER", "designer")
+
+
+@app.get("/concepts/{concept_id}/comments")
+def list_comments(concept_id: str):
+    store = _deps()
+    if store.get_concept(concept_id) is None:
+        raise HTTPException(404, "unknown concept")
+    return {"comments": store.list_comments(concept_id)}
+
+
+@app.post("/concepts/{concept_id}/comments")
+def add_comment(concept_id: str, payload: dict = Body(...)):
+    store = _deps()
+    if store.get_concept(concept_id) is None:
+        raise HTTPException(404, "unknown concept")
+    body = (payload.get("body") or "").strip()
+    if not body:
+        raise HTTPException(400, "payload needs a non-empty 'body' string")
+    version_id = payload.get("version_id")
+    if version_id is not None:
+        v = store.get_version(version_id, include_document=False)
+        if v is None or v["concept_id"] != concept_id:
+            raise HTTPException(
+                400, "version_id does not belong to this concept")
+    return store.add_comment(
+        concept_id, body[:4000], author=INTERNAL_USER,
+        version_id=version_id, anchor_name=payload.get("anchor_name"))
+
+
+@app.post("/comments/{comment_id}/resolve")
+def resolve_comment(comment_id: str):
+    if not _deps().set_comment_resolved(comment_id, True):
+        raise HTTPException(404, "unknown comment")
+    return {"ok": True}
+
+
+@app.post("/comments/{comment_id}/reopen")
+def reopen_comment(comment_id: str):
+    if not _deps().set_comment_resolved(comment_id, False):
+        raise HTTPException(404, "unknown comment")
+    return {"ok": True}
 
 
 @app.get("/versions/{version_id}")
@@ -261,7 +410,8 @@ def download_sla(version_id: str):
     v = store.get_version(version_id)
     if v is None:
         raise HTTPException(404, "unknown version")
-    sla = s["render"].compile(merge_profile(v["document"], s["profile"]))
+    profile = _resolve_profile(_brand_for_version(store, v))
+    sla = s["render"].compile(merge_profile(v["document"], profile))
     return Response(
         content=sla, media_type="application/vnd.scribus.sla+xml",
         headers={"Content-Disposition":
@@ -274,12 +424,14 @@ def mutate(version_id: str, payload: dict = Body(...)):
     if not instruction:
         raise HTTPException(400, "payload needs an 'instruction' string")
     store, s = _gen_deps()
+    parent = store.get_version(version_id, include_document=False)
+    profile = _resolve_profile(_brand_for_version(store, parent))
     try:
         new_id, r = mutate_and_store(
             version_id, instruction, store=store, client=s["client"],
             render=s["render"], pack=s["pack"],
             schema_json=s["schema_json"], schema_path=SCHEMA_PATH,
-            profile=s["profile"])
+            profile=profile)
     except KeyError:
         raise HTTPException(404, "unknown version")
     if new_id is None:

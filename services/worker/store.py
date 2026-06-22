@@ -61,6 +61,12 @@ CREATE TABLE IF NOT EXISTS asset (
     data BLOB NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS brand_profile (
+    name TEXT PRIMARY KEY,
+    profile_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS job (
     id TEXT PRIMARY KEY,
     brief_json TEXT NOT NULL,
@@ -71,6 +77,18 @@ CREATE TABLE IF NOT EXISTS job (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     finished_at TEXT
 );
+CREATE TABLE IF NOT EXISTS comment (
+    id TEXT PRIMARY KEY,
+    concept_id TEXT NOT NULL REFERENCES concept(id),
+    version_id TEXT REFERENCES doc_version(id),
+    anchor_name TEXT,
+    author TEXT NOT NULL,
+    body TEXT NOT NULL,
+    resolved INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_comment_concept
+    ON comment (concept_id, created_at);
 CREATE TRIGGER IF NOT EXISTS doc_version_immutable
     BEFORE UPDATE ON doc_version
     BEGIN SELECT RAISE(ABORT, 'doc_version rows are immutable (GEN-6)'); END;
@@ -159,6 +177,56 @@ class DocStore:
                 "mime": row["mime"], "width": row["width"],
                 "height": row["height"], "data": row["data"],
                 "created_at": row["created_at"]}
+
+    # ---------------------------------------------------------- brand profiles
+
+    def save_brand_profile(self, name, profile):
+        """Upsert a brand profile (BRAND-3 de-singleton). Mutable for now;
+        profile-version pinning once a project uses it is BRAND-4."""
+        with closing(self._connect()) as db:
+            db.execute(
+                "INSERT INTO brand_profile (name, profile_json) VALUES (?,?)"
+                " ON CONFLICT(name) DO UPDATE SET profile_json = excluded."
+                "profile_json, updated_at = datetime('now')",
+                (name, json.dumps(profile, sort_keys=True)))
+            db.commit()
+        return self.get_brand_profile(name)
+
+    def list_brand_profiles(self):
+        """Summaries only — swatch/font counts for the admin grid."""
+        with closing(self._connect()) as db:
+            rows = db.execute(
+                "SELECT name, profile_json, created_at, updated_at"
+                " FROM brand_profile ORDER BY name").fetchall()
+        out = []
+        for r in rows:
+            p = json.loads(r["profile_json"])
+            out.append({
+                "name": r["name"],
+                "version": p.get("version"),
+                "swatches": p.get("swatches", []),
+                "fonts": p.get("fonts", []),
+                "rules": p.get("rules", {}),
+                "created_at": r["created_at"], "updated_at": r["updated_at"]})
+        return out
+
+    def get_brand_profile(self, name):
+        with closing(self._connect()) as db:
+            row = db.execute(
+                "SELECT * FROM brand_profile WHERE name = ?", (name,)).fetchone()
+        if row is None:
+            return None
+        return {"name": row["name"],
+                "profile": json.loads(row["profile_json"]),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"]}
+
+    def delete_brand_profile(self, name):
+        with closing(self._connect()) as db:
+            cur = db.execute(
+                "DELETE FROM brand_profile WHERE name = ?", (name,))
+            db.commit()
+            return cur.rowcount > 0
 
     # ---------------------------------------------------------- jobs
 
@@ -305,3 +373,160 @@ class DocStore:
                 " ORDER BY created_at DESC, rowid DESC LIMIT 1",
                 (concept_id,)).fetchone()
         return self._version_row(row, True) if row else None
+
+    # ---------------------------------------------------------- comments
+
+    def add_comment(self, concept_id, body, *, author,
+                    version_id=None, anchor_name=None):
+        """REV-3 per-concept comment thread (Phase 1). version_id pins the
+        comment to the version under review; anchor_name reserves the
+        per-region pin (item ANNAME) for the P1 follow-up. Comments are
+        mutable (resolve/reopen) — unlike doc_versions — but persisted so a
+        future realtime layer (Liveblocks) is replaceable (PRD §12)."""
+        cid = uuid.uuid4().hex
+        with closing(self._connect()) as db:
+            db.execute(
+                "INSERT INTO comment (id, concept_id, version_id,"
+                " anchor_name, author, body) VALUES (?,?,?,?,?,?)",
+                (cid, concept_id, version_id, anchor_name, author, body))
+            db.commit()
+        return self.get_comment(cid)
+
+    def get_comment(self, comment_id):
+        with closing(self._connect()) as db:
+            row = db.execute(
+                "SELECT * FROM comment WHERE id = ?",
+                (comment_id,)).fetchone()
+        return self._comment_row(row) if row else None
+
+    def list_comments(self, concept_id):
+        with closing(self._connect()) as db:
+            rows = db.execute(
+                "SELECT * FROM comment WHERE concept_id = ?"
+                " ORDER BY created_at, rowid", (concept_id,)).fetchall()
+        return [self._comment_row(r) for r in rows]
+
+    def set_comment_resolved(self, comment_id, resolved):
+        with closing(self._connect()) as db:
+            cur = db.execute(
+                "UPDATE comment SET resolved = ? WHERE id = ?",
+                (1 if resolved else 0, comment_id))
+            db.commit()
+            return cur.rowcount > 0
+
+    @staticmethod
+    def _comment_row(row):
+        return {"id": row["id"], "concept_id": row["concept_id"],
+                "version_id": row["version_id"],
+                "anchor_name": row["anchor_name"],
+                "author": row["author"], "body": row["body"],
+                "resolved": bool(row["resolved"]),
+                "created_at": row["created_at"]}
+
+    # ---------------------------------------------------------- stats (ADM-1)
+
+    def usage_stats(self, job_id=None):
+        """ADM-1 v1: aggregate generation counts, token/cost spend, and
+        validation outcomes from the persisted doc_version provenance.
+
+        Scope is global or per-job — a job is one brief fan-out. (Per-project
+        rollups wait on a `project` entity, which the M2 store doesn't have
+        yet.) Render latency is omitted: it isn't instrumented anywhere.
+        Validation rates count FINAL stored versions only; in-loop repair
+        attempts are fed back to the model and never persisted, so they're not
+        reflected here.
+        """
+        from generation.metering import PRICES_PER_MTOK
+
+        sql = ("SELECT dv.origin, dv.approved, dv.usage_json,"
+               " dv.validation_json FROM doc_version dv")
+        params = ()
+        if job_id is not None:
+            sql += " JOIN concept c ON c.id = dv.concept_id WHERE c.job_id = ?"
+            params = (job_id,)
+        with closing(self._connect()) as db:
+            rows = db.execute(sql, params).fetchall()
+            concept_sql = "SELECT COUNT(*) FROM concept"
+            if job_id is not None:
+                concept_sql += " WHERE job_id = ?"
+            concepts = db.execute(concept_sql, params).fetchone()[0]
+
+        tokens = {"input": 0, "output": 0,
+                  "cache_read": 0, "cache_creation": 0}
+        by_origin, by_model = {}, {}
+        errors_by_code, warnings_by_code = {}, {}
+        cost_total = 0.0
+        calls = approved = versions_with_errors = 0
+
+        def _event_cost(e):
+            price = PRICES_PER_MTOK.get(e["model"])
+            if not price:
+                return None  # unpriced (drift / retired model) — tokens only
+            inp, outp = price
+            return (e.get("input_tokens", 0) * inp
+                    + e.get("output_tokens", 0) * outp
+                    + e.get("cache_read_input_tokens", 0) * inp * 0.1
+                    + e.get("cache_creation_input_tokens", 0) * inp * 1.25
+                    ) / 1e6
+
+        for r in rows:
+            by_origin[r["origin"]] = by_origin.get(r["origin"], 0) + 1
+            if r["approved"]:
+                approved += 1
+            usage = json.loads(r["usage_json"]) if r["usage_json"] else None
+            if usage:
+                cost_total += usage.get("cost_usd") or 0
+                tokens["input"] += usage.get("input_tokens", 0)
+                tokens["output"] += usage.get("output_tokens", 0)
+                tokens["cache_read"] += usage.get(
+                    "cache_read_input_tokens", 0)
+                tokens["cache_creation"] += usage.get(
+                    "cache_creation_input_tokens", 0)
+                for e in usage.get("events", []):
+                    calls += 1
+                    m = by_model.setdefault(
+                        e["model"], {"calls": 0, "input_tokens": 0,
+                                     "output_tokens": 0, "cost_usd": 0.0,
+                                     "priced": True})
+                    m["calls"] += 1
+                    m["input_tokens"] += e.get("input_tokens", 0)
+                    m["output_tokens"] += e.get("output_tokens", 0)
+                    c = _event_cost(e)
+                    if c is None:
+                        m["priced"] = False
+                    else:
+                        m["cost_usd"] += c
+            report = json.loads(r["validation_json"])
+            errs = report.get("errors", [])
+            if errs:
+                versions_with_errors += 1
+            for it in errs:
+                code = it.get("code", "unknown")
+                errors_by_code[code] = errors_by_code.get(code, 0) + 1
+            for it in report.get("warnings", []):
+                code = it.get("code", "unknown")
+                warnings_by_code[code] = warnings_by_code.get(code, 0) + 1
+
+        return {
+            "scope": "job" if job_id is not None else "global",
+            "job_id": job_id,
+            "concepts": concepts,
+            "versions": len(rows),
+            "versions_by_origin": by_origin,
+            "approved_versions": approved,
+            "llm_calls": calls,
+            "cost_usd_total": round(cost_total, 4),
+            "tokens": tokens,
+            "cost_by_model": [
+                {"model": name, "calls": d["calls"],
+                 "input_tokens": d["input_tokens"],
+                 "output_tokens": d["output_tokens"],
+                 "cost_usd": round(d["cost_usd"], 4),
+                 "priced": d["priced"]}
+                for name, d in sorted(by_model.items())],
+            "validation": {
+                "versions_with_errors": versions_with_errors,
+                "errors_by_code": errors_by_code,
+                "warnings_by_code": warnings_by_code,
+            },
+        }

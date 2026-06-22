@@ -1,0 +1,59 @@
+{
+  "name": "Meridian Market",
+  "version": "2026.1",
+  "description": "Premium neighbourhood grocer. Brand profile for the in-store POS engine: locked colour, type, logo lockups and rules (BRAND-1). Reference everything here by NAME — the engine may never define new colours or fonts.",
+  "swatches": [
+    { "name": "HarvestPlum", "space": "cmyk", "values": [55, 80, 35, 45] },
+    { "name": "OrchardRust", "space": "cmyk", "values": [12, 70, 85, 8] },
+    { "name": "GoldenOchre", "space": "cmyk", "values": [10, 35, 90, 5] },
+    { "name": "SageMist", "space": "cmyk", "values": [30, 8, 35, 5] },
+    { "name": "Bone", "space": "cmyk", "values": [2, 3, 8, 0] },
+    { "name": "Ink", "space": "cmyk", "values": [50, 40, 40, 95] },
+    { "name": "CopperSpot", "space": "cmyk", "values": [25, 55, 75, 10], "spot": true },
+    { "name": "CutContour", "space": "cmyk", "values": [0, 100, 0, 0], "spot": true },
+    { "name": "DigitalBerry", "space": "rgb", "values": [138, 32, 90] }
+  ],
+  "fonts": [
+    "Liberation Sans Bold",
+    "Liberation Sans Regular",
+    "Liberation Serif Bold",
+    "Liberation Serif Regular",
+    "Canela Deck Medium",
+    "Söhne Buch",
+    "Söhne Kräftig"
+  ],
+  "charStyles": [
+    { "name": "DisplayXL", "font": "Liberation Sans Bold", "size": 96, "color": "HarvestPlum", "tracking": -15 },
+    { "name": "DisplayHero", "font": "Liberation Sans Bold", "size": 64, "color": "Bone", "tracking": -10 },
+    { "name": "Subhead", "font": "Liberation Sans Bold", "size": 26, "color": "OrchardRust" },
+    { "name": "SubheadOnDark", "font": "Liberation Sans Bold", "size": 26, "color": "GoldenOchre" },
+    { "name": "Body", "font": "Liberation Sans Regular", "size": 13, "color": "Ink" },
+    { "name": "BodyOnDark", "font": "Liberation Sans Regular", "size": 13, "color": "Bone" },
+    { "name": "Price", "font": "Liberation Sans Bold", "size": 120, "color": "OrchardRust", "tracking": -20 },
+    { "name": "Legal", "font": "Liberation Sans Regular", "size": 7, "color": "Ink" }
+  ],
+  "paraStyles": [
+    { "name": "DisplayCenter", "charStyle": "DisplayHero", "align": "center", "lineHeight": 0.95 },
+    { "name": "DisplayForce", "charStyle": "DisplayXL", "align": "force", "lineHeight": 0.92 },
+    { "name": "SubheadLeft", "charStyle": "Subhead", "align": "left", "spaceAfter": 6 },
+    { "name": "BodyLeft", "charStyle": "Body", "align": "left", "lineHeight": 1.3, "spaceAfter": 8 },
+    { "name": "BodyOnDarkLeft", "charStyle": "BodyOnDark", "align": "left", "lineHeight": 1.3, "spaceAfter": 8 },
+    { "name": "BodyJustify", "charStyle": "Body", "align": "justify", "lineHeight": 1.3 },
+    { "name": "LegalLeft", "charStyle": "Legal", "align": "left", "lineHeight": 1.1 }
+  ],
+  "logoAssets": [
+    { "role": "primary", "asset": "meridian-logo", "note": "Full lockup — mark + wordmark. Use on Bone or light photography." },
+    { "role": "reversed", "asset": "meridian-logo-reversed", "note": "For HarvestPlum / dark photographic backgrounds." },
+    { "role": "mark", "asset": "meridian-mark", "note": "Symbol only — minimum 14mm; use where the wordmark won't fit." },
+    { "role": "vector-master", "asset": "meridian-logo.svg", "note": "Authoritative vector master. NOTE: SVG is not an accepted upload format — see GAPS.md." }
+  ],
+  "rules": {
+    "minTypeSize": 7,
+    "contrastFloor": 4.0,
+    "safeZone": true,
+    "mandatoryElements": ["meridian-logo", "legal-line"],
+    "clearSpacePt": 18,
+    "minLogoWidthPt": 84,
+    "spotSeparations": ["CopperSpot", "CutContour"]
+  }
+}

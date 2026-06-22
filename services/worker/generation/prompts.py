@@ -58,6 +58,31 @@ def assets_section(assets):
     return "".join(lines)
 
 
+def mandatories_section(brief):
+    """Make the deterministic brief gates explicit so the model satisfies them
+    first time: required named items (VAL-2/brief) and verbatim copy (VAL-5)."""
+    lines = []
+    names = brief.get("mandatoryElements") or []
+    if names:
+        lines.append("\n\n# Mandatory named items (hard requirement)\n")
+        lines.append("Every concept MUST include an item whose `name` is "
+                     "exactly each of these (the ANNAME anchor):\n")
+        for n in names:
+            lines.append(f"- {n}\n")
+    copy = brief.get("copy", {}) or {}
+    verbatim = [("headline", copy.get("headline")),
+                ("legal", copy.get("legal"))]
+    verbatim += [("mandatory", s) for s in (brief.get("mandatoryCopy") or [])]
+    verbatim = [(k, v) for k, v in verbatim if v]
+    if verbatim:
+        lines.append("\n# Copy that must appear VERBATIM (hard requirement)\n")
+        lines.append("Reproduce character-for-character — no paraphrase, no "
+                     "truncation. The legal line especially must be unaltered:\n")
+        for k, v in verbatim:
+            lines.append(f"- {k}: {v}\n")
+    return "".join(lines)
+
+
 def build_brief_message(brief, archetype, assets=None):
     parts = [
         "# Brief\n",
@@ -65,6 +90,7 @@ def build_brief_message(brief, archetype, assets=None):
         "\n\n# Your layout archetype for THIS concept\n",
         archetype,
         assets_section(assets),
+        mandatories_section(brief),
         "\n\nGenerate one complete document for this brief using the "
         "emit_document tool. Distinctness comes from layout archetype, "
         "composition and hierarchy — not from straying off-brand.",

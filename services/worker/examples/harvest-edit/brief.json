@@ -1,0 +1,71 @@
+{
+  "title": "The Harvest Edit — Autumn Seasonal POS Kit",
+  "brand": "Meridian Market",
+  "campaign": {
+    "code": "MM-AUT26-HARVEST",
+    "objective": "Drive trial of the seasonal Harvest range and Meridian+ member sign-ups across 240 stores.",
+    "audience": "Existing weekly shoppers, 28–55, quality-led, time-poor; skews toward members and lapsed members.",
+    "liveFrom": "2026-09-15",
+    "liveTo": "2026-10-31",
+    "kpis": ["+12% seasonal range units vs LY", "8,000 new Meridian+ sign-ups", "QR scan-through ≥ 4%"]
+  },
+  "format": {
+    "name": "gondola-header",
+    "size": "SRA3",
+    "orientation": "landscape",
+    "bleed": 8.5,
+    "margins": [18, 18, 18, 18]
+  },
+  "formats": [
+    { "name": "gondola-header", "role": "master", "size": "SRA3", "orientation": "landscape", "bleed": 8.5, "margins": [18, 18, 18, 18], "notes": "Hangs above the bay; headline must read from 5 m." },
+    { "name": "poster-a1", "role": "variant", "size": "A1", "orientation": "portrait", "bleed": 10, "margins": [28, 28, 28, 28], "notes": "Window and entrance poster." },
+    { "name": "shelf-strip", "role": "variant", "size": [510, 74], "orientation": "landscape", "bleed": 3, "margins": [6, 6, 6, 6], "notes": "Shelf-edge strip ~180×26 mm; extreme aspect ratio; price-led, minimal copy." },
+    { "name": "aisle-fin", "role": "variant", "size": [300, 600], "orientation": "portrait", "bleed": 5, "margins": [12, 12, 12, 12], "shaped": true, "dieCut": "CutContour", "notes": "Protrudes into aisle; arrow-shaped die cut; needs a CutContour cut path." },
+    { "name": "wobbler", "role": "variant", "size": "A5", "orientation": "portrait", "shaped": true, "dieCut": "CutContour", "bleed": 5, "margins": [10, 10, 10, 10], "notes": "Round die-cut wobbler ~A5; circular cut contour." },
+    { "name": "dump-bin-wrap", "role": "variant", "size": [1200, 400], "orientation": "landscape", "bleed": 10, "margins": [20, 20, 20, 20], "notes": "Wraparound for the promo dump bin; very wide; copy repeats around corners." }
+  ],
+  "copy": {
+    "headline": "THE HARVEST EDIT",
+    "subhead": "Seasonal flavour, picked at its peak",
+    "body": [
+      "Our growers' best of the season — squash, plums, cobnuts and slow-ripened tomatoes, in store now.",
+      "Member price unlocked at the shelf. Scan to add this week's Harvest recipes to your basket."
+    ],
+    "price": { "amount": "2.50", "unit": "each", "was": "3.50", "memberOnly": true },
+    "strapline": "Tastes like the turn of the season.",
+    "qrCaption": "Scan for Harvest recipes",
+    "legal": "*Member price requires a free Meridian+ account. £3.50 saving vs. non-member price on selected lines until 31/10/26, while stocks last. Origin & allergen information at meridianmarket.co.uk/harvest. ©2026 Meridian Market Ltd. T&Cs apply."
+  },
+  "mandatoryElements": ["meridian-logo", "legal-line", "harvest-recipe-qr"],
+  "references": {
+    "imageAssets": [
+      "harvest-hero",
+      "harvest-lifestyle",
+      "kraft-texture",
+      "meridian-logo",
+      "meridian-logo-reversed",
+      "meridian-mark",
+      "harvest-recipe-qr",
+      "leaf-icon",
+      "allergen-icons",
+      "meridian-plus-badge"
+    ],
+    "moodboard": "Farmers'-market warmth meets editorial restraint: deep plum and rust grounds, generous negative space, one confident food hero per piece, copper foil accent on premium touchpoints.",
+    "avoid": "No cluttered starbursts, no rainbow gradients, no stock 'autumn leaves' clip-art, no drop shadows on type."
+  },
+  "tone": "Warm, premium, confident. Editorial grocer — think a good Saturday market stall art-directed by a magazine. Generous colour blocking, strong type hierarchy, never shouty.",
+  "creativeDirection": {
+    "hierarchy": "Headline → food hero → price/member hook → recipe QR → legal. Headline and price must dominate; legal is quiet but present.",
+    "colour": "Ground each piece in HarvestPlum or photography; OrchardRust and GoldenOchre for energy; CopperSpot reserved for the logo lockup and price flash on premium pieces; SageMist sparingly.",
+    "logo": "meridian-logo on light grounds, meridian-logo-reversed on plum/photography. Respect clear space; never below the minimum width.",
+    "accessibility": "Body and legal must clear the 4.0 contrast floor; minimum type size 7 pt; keep all copy inside the safe zone."
+  },
+  "production": {
+    "process": "Litho + spot CopperSpot on header/poster; digital for short-run fins/wobblers.",
+    "substrate": "FSC 350 gsm board, matt laminate.",
+    "finish": "Die-cut shaped pieces use the CutContour spot as the cutter guide (kiss-cut on wobbler).",
+    "outputIntent": "PDF/X-4, FOGRA51 (PSO Coated v3)."
+  },
+  "mandatoryCopy": ["THE HARVEST EDIT", "Meridian+"],
+  "notes": "This is a deliberately maximal brief used to flush out gaps and edge cases across the pipeline. Generate the MASTER format (gondola-header) now; the rest of the kit is the intended variant set (BRF-2 / VAR-1)."
+}
