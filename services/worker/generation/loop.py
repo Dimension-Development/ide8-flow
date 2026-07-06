@@ -180,6 +180,11 @@ def generate_concept(brief, profile, archetype, *, client, render,
             sla = render.compile(staged)
         except CompileRejected as e:
             validation_failures += 1
+            # keep the reject as the result's last-known validation state,
+            # so an exhausted loop reports why it failed (ADM-2); a later
+            # passing iteration overwrites it
+            result.validation = {"ok": False, "errors": e.errors,
+                                 "warnings": []}
             messages.append({"role": "user", "content": [_tool_result(
                 emit.id, json.dumps({"ok": False, "errors": e.errors}),
                 is_error=True)]})
@@ -196,6 +201,10 @@ def generate_concept(brief, profile, archetype, *, client, render,
                              "the frame" % (o.get("item"), o.get("page")))}
                 for o in overflows]}
             result.document = document
+            # as with CompileRejected: if the cap lands here, the stored
+            # version should carry the overflow errors, not the earlier
+            # passing report
+            result.validation = {**overflow_report, "warnings": []}
             messages.append({"role": "user", "content": [_tool_result(
                 emit.id, json.dumps(overflow_report), is_error=True)]})
             continue

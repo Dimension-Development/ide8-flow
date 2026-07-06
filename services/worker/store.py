@@ -110,10 +110,13 @@ class DocStore:
         with closing(self._connect()) as db:
             db.executescript(SCHEMA_SQL)
             db.execute("PRAGMA journal_mode=WAL")  # persistent, set once
-            # lightweight migration: concept.job_id arrived with async jobs
+            # lightweight migrations: concept.job_id arrived with async jobs,
+            # concept.failure_json with failed-generation surfacing (ADM-2)
             cols = {r[1] for r in db.execute("PRAGMA table_info(concept)")}
             if "job_id" not in cols:
                 db.execute("ALTER TABLE concept ADD COLUMN job_id TEXT")
+            if "failure_json" not in cols:
+                db.execute("ALTER TABLE concept ADD COLUMN failure_json TEXT")
             db.commit()
 
     def _connect(self):
@@ -273,6 +276,18 @@ class DocStore:
                 "SELECT * FROM concept WHERE id = ?", (concept_id,)).fetchone()
         return self._concept_row(row) if row else None
 
+    def set_concept_failure(self, concept_id, failure):
+        """ADM-2 (first slice): record why a generation run stored no
+        doc_version for this concept, so the grid can say more than
+        "no proof". Failure is concept curation state, not provenance —
+        mutable, unlike doc_versions."""
+        with closing(self._connect()) as db:
+            cur = db.execute(
+                "UPDATE concept SET failure_json = ? WHERE id = ?",
+                (json.dumps(failure), concept_id))
+            db.commit()
+            return cur.rowcount > 0
+
     def set_discarded(self, concept_id, discarded):
         """REV-1 discard/restore — concept curation state is mutable;
         doc_versions never are."""
@@ -285,10 +300,14 @@ class DocStore:
 
     @staticmethod
     def _concept_row(row):
+        keys = row.keys()
         return {"id": row["id"], "brief": json.loads(row["brief_json"]),
                 "archetype": row["archetype"],
                 "discarded": bool(row["discarded"]),
-                "job_id": row["job_id"] if "job_id" in row.keys() else None,
+                "job_id": row["job_id"] if "job_id" in keys else None,
+                "failure": (json.loads(row["failure_json"])
+                            if "failure_json" in keys and row["failure_json"]
+                            else None),
                 "created_at": row["created_at"]}
 
     # ---------------------------------------------------------- versions

@@ -6,6 +6,16 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "services/ui"],
       "port": 5173
+    },
+    {
+      "name": "worker",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m", "uvicorn", "app:app",
+        "--port", "8200",
+        "--app-dir", "services/worker"
+      ],
+      "port": 8200
     }
   ]
 }

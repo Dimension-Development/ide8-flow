@@ -114,6 +114,31 @@ export default function ConceptGrid({
   );
 }
 
+function NoProof({ concept: c }: { concept: Concept }) {
+  // A concept can lack a proof two ways: the whole run died before storing
+  // a version (concept.failure carries the reason), or the latest stored
+  // version failed validation pre-proof (error codes on the summary).
+  const reason = c.failure
+    ? c.failure.error
+    : c.latest && c.latest.error_codes.length > 0
+      ? `validation failed: ${c.latest.error_codes.join(", ")}`
+      : null;
+  return (
+    <span className="px-4 text-center text-sm text-ink-soft">
+      {reason ? (
+        <>
+          <span className="mb-1 block font-medium text-brand">
+            generation failed
+          </span>
+          {reason}
+        </>
+      ) : (
+        "no proof"
+      )}
+    </span>
+  );
+}
+
 function ConceptCard({
   concept: c,
   onOpen,
@@ -134,20 +159,20 @@ function ConceptCard({
         <div className="flex aspect-[3/4] items-center justify-center bg-ink/5 p-3">
           {c.latest?.has_proof ? (
             <img
-              src={api.proofUrl(c.latest.id)}
+              src={api.thumbUrl(c.latest.id)}
               alt={archetypeName}
               className="max-h-full max-w-full rounded shadow"
               loading="lazy"
             />
           ) : (
-            <span className="text-sm text-ink-soft">no proof</span>
+            <NoProof concept={c} />
           )}
         </div>
       </button>
       <div className="space-y-2 p-4">
         <div className="flex items-center justify-between gap-2">
           <h3 className="truncate font-semibold">{archetypeName}</h3>
-          <Cost usd={c.latest?.cost_usd} />
+          <Cost usd={c.latest?.cost_usd ?? c.failure?.cost_usd} />
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {c.latest && <ApprovalBadge approved={c.latest.approved} />}

@@ -23,6 +23,25 @@ def _asset_map(store):
             for meta in store.list_assets()}
 
 
+def _failure_record(result):
+    """Why a run produced no storable document (ADM-2 first slice) — from
+    the loop's last-known state. Persisted on the concept so the grid can
+    show a reason instead of a bare "no proof"."""
+    reason = result.error
+    if reason is None:
+        codes = sorted({e.get("code", "unknown") for e in
+                        (result.validation or {}).get("errors", [])})
+        reason = ("no valid document after %d iteration(s) — last errors: %s"
+                  % (result.iterations, ", ".join(codes) or "unknown"))
+    return {
+        "error": reason,
+        "iterations": result.iterations,
+        "model_history": result.model_history,
+        "validation": result.validation,
+        "cost_usd": (result.usage or {}).get("cost_usd", 0.0),
+    }
+
+
 def generate_and_store(brief, *, n, store, client, render, pack,
                        schema_json, schema_path, profile, config=None,
                        job_id=None):
@@ -38,14 +57,20 @@ def generate_and_store(brief, *, n, store, client, render, pack,
                 pack=pack, schema_json=schema_json, schema_path=schema_path,
                 config=config, assets=assets)
         except Exception as e:  # noqa: BLE001 — one concept must not kill the job
+            error = f"{type(e).__name__}: {e}"[:500]
+            store.set_concept_failure(concept_id, {
+                "error": error, "iterations": 0,
+                "model_history": [], "validation": None, "cost_usd": 0.0})
             return {
                 "concept_id": concept_id, "version_id": None,
                 "archetype": archetype, "approved": False,
                 "iterations": 0, "cost_usd": 0.0,
-                "error": f"{type(e).__name__}: {e}"[:500],
+                "error": error,
             }
         version_id = None
-        if r.document is not None:
+        if r.document is None:
+            store.set_concept_failure(concept_id, _failure_record(r))
+        else:
             import base64
             version_id = store.add_version(
                 concept_id, r.document,

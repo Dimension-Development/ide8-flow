@@ -7,8 +7,16 @@ export interface LatestSummary {
   has_proof: boolean;
   created_at: string;
   validation_ok: boolean | null;
+  error_codes: string[];
   warnings: number;
   cost_usd: number | null;
+}
+
+export interface ConceptFailure {
+  error: string;
+  iterations: number;
+  model_history: string[];
+  cost_usd: number;
 }
 
 export interface Concept {
@@ -18,6 +26,7 @@ export interface Concept {
   discarded: boolean;
   created_at: string;
   latest: LatestSummary | null;
+  failure: ConceptFailure | null;
 }
 
 export interface Version {
@@ -222,6 +231,7 @@ export const api = {
       body: JSON.stringify({ instruction }),
     }).then((r) => j<MutationResponse>(r)),
   proofUrl: (versionId: string) => `/api/versions/${versionId}/proof.png`,
+  thumbUrl: (versionId: string) => `/api/versions/${versionId}/thumb.png`,
   comments: (conceptId: string) =>
     fetch(`/api/concepts/${conceptId}/comments`).then((r) =>
       j<{ comments: Comment[] }>(r),

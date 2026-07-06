@@ -124,6 +124,16 @@ class TestStore(unittest.TestCase):
         b = {"a": [1, 2], "b": 1}
         self.assertEqual(content_hash(a), content_hash(b))
 
+    def test_concept_failure_roundtrip(self):
+        s = temp_store()
+        cid = s.create_concept({}, "Hero split")
+        self.assertIsNone(s.get_concept(cid)["failure"])
+        self.assertTrue(s.set_concept_failure(
+            cid, {"error": "boom", "iterations": 4}))
+        self.assertEqual(s.get_concept(cid)["failure"]["error"], "boom")
+        self.assertEqual(s.list_concepts()[0]["failure"]["iterations"], 4)
+        self.assertFalse(s.set_concept_failure("nope", {"error": "x"}))
+
 
 class TestJobs(unittest.TestCase):
 
@@ -182,6 +192,34 @@ class TestJobs(unittest.TestCase):
         errors = [c["error"] for c in summary["concepts"] if c["error"]]
         self.assertEqual(len(errors), 1)
         self.assertIn("429", errors[0])
+        # ADM-2: the crashed concept carries the reason for the grid
+        failed = [c for c in s.concepts_for_job(jid) if c["failure"]]
+        self.assertEqual(len(failed), 1)
+        self.assertIn("429", failed[0]["failure"]["error"])
+
+    def test_fully_failed_concept_records_failure_reason(self):
+        # L2 live finding (22 Jun 2026): a concept whose every iteration
+        # failed validation stored no doc_version, so the grid showed
+        # "no proof" with no reason and the spend vanished from view.
+        from generation.loop import GenConfig
+        from generation.service import generate_and_store
+
+        s = temp_store()
+        jid = s.create_job({"title": "t"}, 1)
+        client = ScriptedClient([emit_resp(invalid_doc()),
+                                 emit_resp(invalid_doc())])
+        summary = generate_and_store(
+            {"title": "t"}, n=1, store=s, client=client, render=FakeRender(),
+            pack=PACK, schema_json=SCHEMA_JSON, schema_path=SCHEMA_PATH,
+            profile=PROFILE, job_id=jid, config=GenConfig(max_iterations=2))
+
+        self.assertEqual(summary["approved"], 0)
+        c = s.concepts_for_job(jid)[0]
+        self.assertIsNone(s.latest_version(c["id"]))
+        f = c["failure"]
+        self.assertIn("no valid document after 2 iteration(s)", f["error"])
+        self.assertTrue(f["validation"]["errors"])
+        self.assertGreater(f["cost_usd"], 0)  # spend is visible, not lost
 
     def test_failed_job_records_error(self):
         s = temp_store()

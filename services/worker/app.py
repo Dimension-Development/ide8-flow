@@ -194,6 +194,8 @@ def _latest_summary(store, concept_id):
         "origin": latest["origin"], "has_proof": latest["has_proof"],
         "created_at": latest["created_at"],
         "validation_ok": latest["validation"].get("ok"),
+        "error_codes": sorted({e.get("code", "unknown") for e in
+                               latest["validation"].get("errors", [])}),
         "warnings": len(latest["validation"].get("warnings", [])),
         "cost_usd": (latest["usage"] or {}).get("cost_usd"),
     }
@@ -386,6 +388,33 @@ def proof(version_id: str):
     png = _deps().get_proof(version_id)
     if png is None:
         raise HTTPException(404, "no proof for this version")
+    return Response(content=png, media_type="image/png")
+
+
+# Proof thumbnails (REV-2): the grid shows 6-8 cards at ~400px; full proofs
+# are ~1MP PNGs. doc_versions are immutable, so a rendered thumb never goes
+# stale — cache unboundedly-ish and clear wholesale if it ever grows.
+THUMB_MAX_EDGE = 512
+_thumb_cache = {}
+
+
+@app.get("/versions/{version_id}/thumb.png")
+def thumb(version_id: str):
+    png = _thumb_cache.get(version_id)
+    if png is None:
+        full = _deps().get_proof(version_id)
+        if full is None:
+            raise HTTPException(404, "no proof for this version")
+        import io
+
+        from PIL import Image
+        im = Image.open(io.BytesIO(full))
+        im.thumbnail((THUMB_MAX_EDGE, THUMB_MAX_EDGE))
+        buf = io.BytesIO()
+        im.save(buf, "PNG", optimize=True)
+        if len(_thumb_cache) >= 512:
+            _thumb_cache.clear()
+        png = _thumb_cache[version_id] = buf.getvalue()
     return Response(content=png, media_type="image/png")
 
 
