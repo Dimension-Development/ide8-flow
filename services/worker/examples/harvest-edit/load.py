@@ -46,6 +46,11 @@ def main():
     base = args.worker.rstrip("/")
 
     brand = json.loads((HERE / "brand_profile.json").read_text())
+    # DESIGN.md authors the interpretive principles as real markdown; they
+    # ship inside the stored profile as brand.designPrinciples
+    design = HERE / "DESIGN.md"
+    if design.exists():
+        brand["designPrinciples"] = design.read_text()
     brief = json.loads((HERE / "brief.json").read_text())
     manifest = json.loads((HERE / "manifest.json").read_text())
 

@@ -219,7 +219,8 @@ def generate_concept(brief, profile, archetype, *, client, render,
             {"type": "image", "source": {"type": "base64",
                                          "media_type": "image/png",
                                          "data": png_b64}},
-            {"type": "text", "text": prompts.build_critique_message(brief)},
+            {"type": "text", "text": prompts.build_critique_message(
+                brief, profile=profile)},
         ]})
         resp = client.messages.create(
             model=model, max_tokens=cfg.max_tokens, system=system,

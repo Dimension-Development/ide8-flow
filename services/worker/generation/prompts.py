@@ -23,7 +23,17 @@ def load_pack(version):
 
 def build_system(pack, schema_json, profile, exemplar):
     """Stable, cacheable system blocks. Order matters: never reorder —
-    byte-stability of this prefix is what makes fan-out calls cache-share."""
+    byte-stability of this prefix is what makes fan-out calls cache-share.
+
+    profile.designPrinciples (a DESIGN.md-style markdown string) is the
+    brand's *interpretive* layer — composition, hierarchy, imagery, taste.
+    It's split out of the machine-rules JSON into its own prose block, and
+    the critique rubric judges proofs against it. The division of labour is
+    strict: anything machine-checkable (contrast, sizes, mandatories)
+    belongs in profile.rules where validation enforces it, never here."""
+    principles = profile.get("designPrinciples")
+    machine_profile = {k: v for k, v in profile.items()
+                       if k != "designPrinciples"}
     blocks = [
         {"type": "text", "text": pack["system_text"]},
         {"type": "text", "text":
@@ -31,12 +41,19 @@ def build_system(pack, schema_json, profile, exemplar):
             "must conform)\n\n" + json.dumps(schema_json, sort_keys=True)},
         {"type": "text", "text":
             "## Brand profile (locked — reference swatches/styles/fonts by "
-            "name; never redefine them)\n\n" + json.dumps(profile, sort_keys=True)},
+            "name; never redefine them)\n\n"
+            + json.dumps(machine_profile, sort_keys=True)},
+    ]
+    if principles:
+        blocks.append({"type": "text", "text":
+            "## Brand design principles (interpretive — every composition "
+            "choice should be defensible against these, and your critique "
+            "must judge the rendered proof against them)\n\n" + principles})
+    blocks.append(
         {"type": "text", "text":
             "## Exemplar document (style reference for structure, not "
             "content)\n\n" + json.dumps(exemplar, sort_keys=True),
-         "cache_control": {"type": "ephemeral"}},
-    ]
+         "cache_control": {"type": "ephemeral"}})
     return blocks
 
 
@@ -98,13 +115,16 @@ def build_brief_message(brief, archetype, assets=None):
     return "".join(parts)
 
 
-def build_critique_message(brief):
+def build_critique_message(brief, profile=None):
+    principles = ("the brand design principles in the system prompt, "
+                  if (profile or {}).get("designPrinciples") else "")
     return (
         "Above is the rendered proof of your document. Critique it against "
-        "the brief and brand rules: hierarchy, legibility, balance, use of "
-        "bleed, copy fit, overall craft. Respond via the submit_critique "
-        "tool only. Approve only if a designer would put this in front of "
-        "a client as a first-round concept.\n\nBrief reminder: "
+        f"the brief, {principles}and brand rules: hierarchy, legibility, "
+        "balance, use of bleed, copy fit, overall craft. Respond via the "
+        "submit_critique tool only. Approve only if a designer would put "
+        "this in front of a client as a first-round concept.\n\n"
+        "Brief reminder: "
         + json.dumps({k: brief[k] for k in ("title", "copy")
                       if k in brief}, sort_keys=True)
     )

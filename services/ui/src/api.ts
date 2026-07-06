@@ -139,6 +139,7 @@ export interface BrandSummary {
   swatches: Swatch[];
   fonts: string[];
   rules: Record<string, unknown>;
+  designPrinciples: string | null;
   created_at: string;
   updated_at: string;
 }

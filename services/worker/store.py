@@ -210,6 +210,7 @@ class DocStore:
                 "swatches": p.get("swatches", []),
                 "fonts": p.get("fonts", []),
                 "rules": p.get("rules", {}),
+                "designPrinciples": p.get("designPrinciples"),
                 "created_at": r["created_at"], "updated_at": r["updated_at"]})
         return out
 

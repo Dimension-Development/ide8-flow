@@ -1,6 +1,97 @@
 import { useEffect, useState } from "react";
 import { api, type BrandSummary, type Swatch } from "../api";
 
+// DESIGN.md-style interpretive brand direction. Machine-checkable rules
+// stay in profile.rules; this is the language the engine designs and
+// self-critiques against. Saved by merging into the full stored profile so
+// the JSON-paste editor below stays the source of truth for everything else.
+function PrinciplesEditor({
+  brand,
+  onSaved,
+  onError,
+}: {
+  brand: BrandSummary;
+  onSaved: () => Promise<void>;
+  onError: (e: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const full = await api.brand(brand.name);
+      const profile = { ...full.profile } as Record<string, unknown>;
+      if (text.trim()) profile.designPrinciples = text;
+      else delete profile.designPrinciples;
+      await api.saveBrand(profile);
+      setEditing(false);
+      await onSaved();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="mt-3 border-t border-ink/10 pt-3 text-xs">
+        <span className="font-semibold">Design principles:</span>{" "}
+        {brand.designPrinciples ? (
+          <span className="text-ink-soft">
+            {brand.designPrinciples.split(/\s+/).length} words
+          </span>
+        ) : (
+          <span className="text-ink-soft">none</span>
+        )}
+        <button
+          onClick={() => {
+            setText(brand.designPrinciples ?? "");
+            setEditing(true);
+          }}
+          className="ml-2 font-semibold text-ink underline-offset-2 hover:underline"
+        >
+          {brand.designPrinciples ? "edit" : "add"}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-3 border-t border-ink/10 pt-3">
+      <p className="mb-2 text-xs text-ink-soft">
+        Interpretive direction (markdown) — composition, hierarchy, imagery,
+        taste. The engine designs and self-critiques against this. Hard rules
+        (contrast, sizes, mandatory items) belong in the profile JSON, where
+        validation enforces them.
+      </p>
+      <textarea
+        className="w-full rounded-lg border border-ink/15 bg-white p-2 font-mono text-xs outline-none focus:border-brand"
+        rows={12}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={"# Brand — design principles\n\n## Composition\n- …"}
+      />
+      <div className="mt-2 flex gap-2">
+        <button
+          onClick={save}
+          disabled={busy}
+          className="rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-cream transition hover:bg-ink-soft disabled:opacity-40"
+        >
+          {busy ? "Saving…" : "Save principles"}
+        </button>
+        <button
+          onClick={() => setEditing(false)}
+          className="text-xs text-ink-soft underline-offset-2 hover:underline"
+        >
+          cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function swatchCss(s: Swatch): string {
   if (s.space === "rgb") {
     const [r, g, b] = s.values;
@@ -151,6 +242,11 @@ export default function BrandsView() {
                       </span>
                     )}
                 </div>
+                <PrinciplesEditor
+                  brand={b}
+                  onSaved={load}
+                  onError={setError}
+                />
               </div>
             );
           })}
