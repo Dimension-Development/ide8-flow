@@ -21,7 +21,7 @@ render-host font validation) are documented with a recommended approach.
 | Closing now 🔧 | Deferred 📋 |
 |---|---|
 | Brand profiles in the store + select by `brief.brand` (BRAND-3) | Multi-format kit / variant reflow (BRF-2, VAR-1) |
-| Brand admin UI (list/create, swatch + type preview) | Vector (SVG/EPS/PDF) asset ingestion (RND-5) |
+| Brand admin UI (list/create, swatch + type preview) | Vector (SVG/EPS/PDF) + layered PSD asset ingestion (RND-5) |
 | `brief.mandatoryElements` actually enforced + prompted | Render-host font-availability check (server fonts) |
 | Copy-integrity check VAL-5 (verbatim copy deck) | Profile-version pinning / reproducible `.sla` (BRAND-4) |
 | Brief form: brand, mandatory elements, bleed/margins, reference assets | Per-format mandatory elements; closed die-cut contours |
@@ -65,6 +65,7 @@ render-host font validation) are documented with a recommended approach.
 | D5 | No min-size / DPI check | 16×16 accepted and upscaled into any frame → blurry print. No effective-DPI warning vs frame. | Low | RND-5 | 📋 |
 | D6 | Aspect never validated | Asset aspect is shown to the engine but never checked against the placing frame; `stretch` can distort silently. | Low | RND-5 | 📋 |
 | D7 | Write-once, no delete/replace | Fixing a typo or updating artwork needs a brand-new name; there's no admin delete (by design for history, but no affordance/guidance). | Low | RND-5 | 📋 |
+| D8 | **Layered PSD unsupported** (noted 6 Jul 2026 from a client-asset question, not part of the Harvest fixture) | `sniff()` doesn't recognise `8BPS` → `.psd` upload returns 415, same gate as D1. Two distinct halves: **transparency already works** — a flattened PNG with alpha uploads, places in Scribus, and survives PDF/X-4 export (X-4 keeps live transparency); **layers are structurally unsupported** — the document schema treats assets as atomic images, so layer semantics ("hide the price flash") have nowhere to live even if upload accepted PSD. Tiers: (1) state "flattened PNG/TIFF with transparency" as the client asset requirement in brand intake docs (free — recommended, fold into the pilot-brand-assets homework); (2) accept + stage PSD as-is (S — Scribus places `.psd` natively; needs sniff signature, `EXT_BY_MIME`, dims for the D4 guard; thumbnails need Pillow's composite read, which requires "Maximize Compatibility" saves, else convert to PNG at ingest); (3) layer-aware assets = new schema semantics, Phase 3. | Med | RND-5 | 📋 |
 
 ## E. Copy
 
