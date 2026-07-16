@@ -12,7 +12,8 @@ services:
       context: .
       dockerfile: services/worker/Dockerfile
     environment:
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY for /generate and /mutate}
+      # required for /generate and /mutate; browse/review works without it
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       RENDER_URL: http://render:8000
     volumes:
       - worker-data:/data
