@@ -18,14 +18,14 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Body, FastAPI, HTTPException, Response
+from fastapi import Body, FastAPI, HTTPException, Request, Response
 
 WORKER_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(WORKER_ROOT))
 
 import base64  # noqa: E402
 
-from assets import SAFE_NAME, sniff  # noqa: E402
+from assets import SAFE_NAME, resolve_srcs, sniff  # noqa: E402
 from brand import load_profile, merge_profile  # noqa: E402
 from generation import prompts  # noqa: E402
 from generation.loop import GenConfig  # noqa: E402
@@ -445,6 +445,73 @@ def download_sla(version_id: str):
         content=sla, media_type="application/vnd.scribus.sla+xml",
         headers={"Content-Disposition":
                  f'attachment; filename="ide8-{version_id[:8]}.sla"'})
+
+
+@app.get("/versions/{version_id}/bundle.zip")
+def download_bundle(version_id: str, request: Request):
+    """EXP-5: the craft-pass bundle — everything a designer needs to open
+    this version in Scribus with no missing images, plus a manifest carrying
+    the identity EXP-7's return script will need.
+
+    Layout:  ide8-<id8>/document.sla        image srcs resolved to assets/…
+             ide8-<id8>/assets/<name>.<ext> every referenced asset
+             ide8-<id8>/manifest.json       concept/version ids, brand, hashes
+             ide8-<id8>/profile.json        the profile the .sla was compiled
+                                            against (BRAND-4 note: best-effort
+                                            live resolution until profile
+                                            versions are pinned per version)
+    """
+    import hashlib
+    import io as _io
+    import zipfile
+
+    store, s = _gen_deps()
+    v = store.get_version(version_id)
+    if v is None:
+        raise HTTPException(404, "unknown version")
+    profile = _resolve_profile(_brand_for_version(store, v))
+    merged = merge_profile(v["document"], profile)
+    asset_map = {meta["name"]: store.get_asset(meta["name"])
+                 for meta in store.list_assets()}
+    staged, files = resolve_srcs(merged, asset_map)
+    sla = s["render"].compile(staged)
+
+    referenced = {item.get("src") for pg in v["document"].get("pages", [])
+                  for item in pg.get("items", [])
+                  if item.get("type") == "image"}
+    missing = sorted(name for name in referenced
+                     if name and name not in asset_map)
+
+    profile_json = json.dumps(profile, indent=2, sort_keys=True)
+    manifest = {
+        "bundle": "ide8.flow craft-pass bundle (EXP-5)",
+        "concept_id": v["concept_id"],
+        "version_id": version_id,
+        "schema_version": v.get("schema_version"),
+        "created_at": v.get("created_at"),
+        "brand": profile.get("name"),
+        "profile_sha256": hashlib.sha256(
+            profile_json.encode()).hexdigest(),
+        "sla_sha256": hashlib.sha256(sla).hexdigest(),
+        "assets": sorted(files),
+        "missing_assets": missing,
+        "worker_url": str(request.base_url).rstrip("/"),
+        "return_path": f"/versions/{version_id}/handoff (EXP-3/EXP-7 — "
+                       f"not yet implemented)",
+    }
+
+    root = f"ide8-{version_id[:8]}"
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(f"{root}/document.sla", sla)
+        for relpath, data in sorted(files.items()):
+            z.writestr(f"{root}/{relpath}", data)
+        z.writestr(f"{root}/manifest.json", json.dumps(manifest, indent=2))
+        z.writestr(f"{root}/profile.json", profile_json)
+    return Response(
+        content=buf.getvalue(), media_type="application/zip",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{root}-bundle.zip"'})
 
 
 @app.post("/versions/{version_id}/mutate")

@@ -213,6 +213,7 @@ export const api = {
     }).then((r) => j<Asset>(r)),
   assetUrl: (name: string) => `/api/assets/${name}`,
   slaUrl: (versionId: string) => `/api/versions/${versionId}/document.sla`,
+  bundleUrl: (versionId: string) => `/api/versions/${versionId}/bundle.zip`,
   documentUrl: (versionId: string) =>
     `/api/versions/${versionId}/document.json`,
   concepts: (includeDiscarded: boolean) =>
