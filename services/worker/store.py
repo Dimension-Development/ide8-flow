@@ -95,6 +95,42 @@ CREATE TRIGGER IF NOT EXISTS doc_version_immutable
 CREATE TRIGGER IF NOT EXISTS doc_version_no_delete
     BEFORE DELETE ON doc_version
     BEGIN SELECT RAISE(ABORT, 'doc_version rows are immutable (GEN-6)'); END;
+CREATE TABLE IF NOT EXISTS template (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    source_version_id TEXT NOT NULL REFERENCES doc_version(id),
+    document_json TEXT NOT NULL,
+    bindings_json TEXT NOT NULL,
+    brand TEXT,
+    schema_version TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TRIGGER IF NOT EXISTS template_immutable
+    BEFORE UPDATE ON template
+    BEGIN SELECT RAISE(ABORT, 'template rows are immutable (TPL-1)'); END;
+CREATE TABLE IF NOT EXISTS template_run (
+    id TEXT PRIMARY KEY,
+    template_id TEXT NOT NULL REFERENCES template(id),
+    status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued', 'running', 'done', 'failed')),
+    error TEXT,
+    rows_json TEXT NOT NULL,
+    results_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS template_output (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES template_run(id),
+    row_index INTEGER NOT NULL,
+    document_json TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    proof_png BLOB,
+    pdf BLOB,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_output_run
+    ON template_output (run_id, row_index);
 """
 
 
@@ -298,6 +334,119 @@ class DocStore:
                 (1 if discarded else 0, concept_id))
             db.commit()
             return cur.rowcount > 0
+
+    # ---------------------------------------------------------- templates
+
+    def create_template(self, name, source_version_id, document, bindings,
+                        brand, schema_version):
+        """TPL-1: templates are immutable at creation (DB-trigger enforced,
+        like doc_version). Returns None if the name is taken."""
+        tid = uuid.uuid4().hex
+        with closing(self._connect()) as db:
+            try:
+                db.execute(
+                    "INSERT INTO template (id, name, source_version_id,"
+                    " document_json, bindings_json, brand, schema_version)"
+                    " VALUES (?,?,?,?,?,?,?)",
+                    (tid, name, source_version_id,
+                     json.dumps(document, sort_keys=True),
+                     json.dumps(bindings, sort_keys=True),
+                     brand, schema_version))
+                db.commit()
+            except sqlite3.IntegrityError:
+                return None
+        return tid
+
+    def get_template(self, template_id):
+        with closing(self._connect()) as db:
+            row = db.execute("SELECT * FROM template WHERE id = ?",
+                             (template_id,)).fetchone()
+        if row is None:
+            return None
+        return {"id": row["id"], "name": row["name"],
+                "source_version_id": row["source_version_id"],
+                "document": json.loads(row["document_json"]),
+                "bindings": json.loads(row["bindings_json"]),
+                "brand": row["brand"],
+                "schema_version": row["schema_version"],
+                "created_at": row["created_at"]}
+
+    def list_templates(self):
+        with closing(self._connect()) as db:
+            rows = db.execute(
+                "SELECT id, name, source_version_id, bindings_json, brand,"
+                " schema_version, created_at FROM template"
+                " ORDER BY created_at").fetchall()
+        return [{"id": r["id"], "name": r["name"],
+                 "source_version_id": r["source_version_id"],
+                 "slots": sorted(
+                     json.loads(r["bindings_json"]).get("slots", {})),
+                 "brand": r["brand"],
+                 "schema_version": r["schema_version"],
+                 "created_at": r["created_at"]} for r in rows]
+
+    def create_template_run(self, template_id, rows):
+        rid = uuid.uuid4().hex
+        with closing(self._connect()) as db:
+            db.execute(
+                "INSERT INTO template_run (id, template_id, rows_json)"
+                " VALUES (?,?,?)",
+                (rid, template_id, json.dumps(rows)))
+            db.commit()
+        return rid
+
+    def set_template_run(self, run_id, status, results=None, error=None,
+                         finished=False):
+        with closing(self._connect()) as db:
+            db.execute(
+                "UPDATE template_run SET status = ?, error = ?,"
+                " results_json = COALESCE(?, results_json),"
+                " finished_at = CASE WHEN ? THEN datetime('now')"
+                " ELSE finished_at END WHERE id = ?",
+                (status, error,
+                 json.dumps(results) if results is not None else None,
+                 1 if finished else 0, run_id))
+            db.commit()
+
+    def get_template_run(self, run_id):
+        with closing(self._connect()) as db:
+            row = db.execute("SELECT * FROM template_run WHERE id = ?",
+                             (run_id,)).fetchone()
+        if row is None:
+            return None
+        return {"id": row["id"], "template_id": row["template_id"],
+                "status": row["status"], "error": row["error"],
+                "rows": json.loads(row["rows_json"]),
+                "results": json.loads(row["results_json"]),
+                "created_at": row["created_at"],
+                "finished_at": row["finished_at"]}
+
+    def add_template_output(self, run_id, row_index, document, proof_png,
+                            pdf):
+        oid = uuid.uuid4().hex
+        with closing(self._connect()) as db:
+            db.execute(
+                "INSERT INTO template_output (id, run_id, row_index,"
+                " document_json, content_hash, proof_png, pdf)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (oid, run_id, row_index,
+                 json.dumps(document, sort_keys=True),
+                 content_hash(document), proof_png, pdf))
+            db.commit()
+        return oid
+
+    def get_template_output(self, output_id):
+        with closing(self._connect()) as db:
+            row = db.execute("SELECT * FROM template_output WHERE id = ?",
+                             (output_id,)).fetchone()
+        if row is None:
+            return None
+        return {"id": row["id"], "run_id": row["run_id"],
+                "row_index": row["row_index"],
+                "document": json.loads(row["document_json"]),
+                "content_hash": row["content_hash"],
+                "proof_png": row["proof_png"], "pdf": row["pdf"],
+                "created_at": row["created_at"]}
 
     @staticmethod
     def _concept_row(row):
