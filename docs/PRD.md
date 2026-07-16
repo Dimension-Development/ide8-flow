@@ -4,10 +4,12 @@
 
 | | |
 |---|---|
-| Version | 0.4 |
-| Date | 11 June 2026 |
+| Version | 0.5 |
+| Date | 16 July 2026 |
 | Owner | Luke — Print Services Director, Dimension Development Ltd |
 | Status | In development. M0 + M1 complete; M2 (internal MVP UI) in progress |
+
+**Changes in v0.5** — Templates & volume production added as §7.12 (TPL-1..5), formalising the Phase-3 "template/kit system" after a study of CHILI GraFx: approved concepts promote to slot-bound templates; bind-and-render is deterministic and LLM-free, making volume/VDP output near-zero marginal cost. Animated/digital-channel output and canvas (WYSIWYG) editing explicitly rejected — NL mutation + slot forms remain the editing surface · Craft-pass seamlessness added to EXP (EXP-5 asset-complete bundle, EXP-6 one-click open in Scribus, EXP-7 return-to-platform from inside Scribus) — EXP-3 round-trip is the anchor; these remove its friction · `template` entity added to §10 · hosted-Scribus-in-browser recorded as an open question.
 
 **Changes in v0.4** — M1 exit criteria met (11 Jun 2026): brief JSON → 6 validated concepts with the full self-critique loop, fully via API; $1.56/brief total LLM spend (~$0.26/concept) against the £2 NFR; 2/6 self-critique-approved at iteration cap 4; GEN-5 escalation verified live (Opus closed both approvals); owner sign-off on rendered outputs · GEN-6/7 + VAL-7 live: immutable doc_version store (DB-trigger enforced) with full provenance and sha256 content hashes; NL mutation API returning before/after proof pair + structural diff · M2 begun: proof grid (REV-1) and concept detail with version timeline + mutation box (REV-2) shipped as internal preview; store concurrency hardened (WAL) after a live locked-database failure under UI read load.
 
@@ -65,7 +67,7 @@ Brief intake, generation loop, validation, proof grid with comments, manual expo
 External reviewer access, approval gates, PDF/X packaging into Phoenix/PitStop via n8n, Monday.com sync.
 
 ### Phase 3 — Scale & craft
-IDML export, chained text frames, image/asset library, house-style image generation hooks (ComfyUI/FLUX), template/kit system, analytics.
+IDML export, chained text frames, image/asset library, house-style image generation hooks (ComfyUI/FLUX), template/kit system (§7.12 TPL), volume/VDP production, analytics.
 
 **Out of scope (all phases):** raster image editing, general-purpose page layout UI (no drawing tools — by design), video/motion, e-commerce artwork, fully autonomous (human-gate-free) production release.
 
@@ -165,6 +167,9 @@ Deterministic, ordered cheapest-first. VAL-1..5 run pre-render; VAL-6 reads back
 - **EXP-2 (P1)** Download packaged PDF/X per format.
 - **EXP-3 (P1)** Round-trip: upload a hand-finished `.sla` against a concept as a new locked version (flagged `hand_finished`; no further LLM mutation permitted on that branch).
 - **EXP-4 (P2)** IDML download (via RND-7).
+- **EXP-5 (P1)** Craft-pass bundle: one download containing the `.sla`, every referenced asset at its staged relative path, and a `manifest.json` (concept/version ids, brand-profile version, worker URL) — opens in Scribus with no missing images. The `.sla` is compiled against the profile version the concept was generated under, not the live profile.
+- **EXP-6 (P2)** One-click open: `ide8://` protocol handler + a small local helper that fetches the EXP-5 bundle into a managed workdir and launches Scribus on it. UI shows the version as "out for craft pass".
+- **EXP-7 (P2)** Return from Scribus: a scripter script shipped in every EXP-5 bundle; run from Scribus's Script menu, it saves the document and POSTs it to the EXP-3 endpoint using the manifest's identity — the new `hand_finished` version and a fresh proof appear in the concept timeline without leaving Scribus. Together EXP-5..7 make the craft pass feel like a mode of the platform, not an export.
 
 ### 7.10 Production handoff (PRD)
 
@@ -179,6 +184,17 @@ Deterministic, ordered cheapest-first. VAL-1..5 run pre-render; VAL-6 reads back
 - **ADM-2 (P0)** Structured logging with trace IDs across gateway → worker → render service.
 - **ADM-3 (P1)** Cost guardrails: per-project token budget with soft warning and hard cap.
 - **ADM-4 (P1)** Prompt pack management UI (versioned, diffable, promotable).
+
+### 7.12 Templates & volume production (TPL)
+
+Formalises the Phase-3 "template/kit system", cherry-picked from a study of CHILI GraFx (smart templates, variable data, brand-locked editing). The strategic inversion: CHILI's workflow starts with a designer hand-building the template; ours starts with a brief and *generates* the design — promotion to template happens after human approval, so LLM spend is per-design, not per-output. Out of scope from the comparator: animated/digital-channel output; canvas (WYSIWYG) editing — NL mutation (GEN-7) and slot forms are the editing surface, per §5.
+
+- **TPL-1 (P1)** Promote an approved `doc_version` to a **template**: the document plus a bindings map declaring slots (bindable text frames, image slots, swatches) and locked items. Templates are versioned and immutable once used (same pattern as `brand_profile`).
+- **TPL-2 (P1)** Bind-and-render: template + field values → validated document → compile → proof/PDF with **no LLM call**. Deterministic and reproducible; bound values pass the relevant VAL gates (copy integrity, contrast, overflow report) before render. Proof budget per §8 applies (< 2 s).
+- **TPL-3 (P1)** Batch (VDP): bind a template over tabular rows (CSV/JSON upload) → one output per row + a run manifest (per-row status, hashes). Row failures are reported per-row, never batch-fatal.
+- **TPL-4 (P2)** Deterministic copyfitting: bound text that overflows steps the font size down within a template-declared minimum; below minimum is a per-row validation failure, never silent truncation.
+- **TPL-5 (P2)** Slot-form editing in the review UI: a form over a template's bindings with live re-rendered proof — constrained editing for non-designers without a layout canvas.
+- **TPL-6 (P2)** Locked items are enforced in the mutation loop: a GEN-7 mutation whose structural diff touches a locked item is rejected before persistence.
 
 ## 8. Non-functional requirements
 
@@ -216,7 +232,7 @@ Stack choices follow the established house pattern: FastAPI microservices in Doc
 
 ## 10. Data model (core entities)
 
-`brand_profile` (versioned JSON, immutable-once-used) · `project` (brief metadata, brand_profile_version, status) · `format` (per-project output spec, master flag) · `concept` (project-scoped, discard flag) · `doc_version` (concept-scoped, immutable: document JSON, document-schema version, parent_version, provenance — model, prompt_pack, validation_report, proof_path, hand_finished flag) · `comment` (anchored to concept/version/region; author role) · `approval` (version hash, approver, timestamp) · `release` (manifest, preflight result, monday_item) · `prompt_pack` (versioned) · `usage_event` (tokens, renders, cost).
+`brand_profile` (versioned JSON, immutable-once-used) · `project` (brief metadata, brand_profile_version, status) · `format` (per-project output spec, master flag) · `concept` (project-scoped, discard flag) · `doc_version` (concept-scoped, immutable: document JSON, document-schema version, parent_version, provenance — model, prompt_pack, validation_report, proof_path, hand_finished flag) · `comment` (anchored to concept/version/region; author role) · `approval` (version hash, approver, timestamp) · `release` (manifest, preflight result, monday_item) · `prompt_pack` (versioned) · `usage_event` (tokens, renders, cost) · `template` (promoted from an approved doc_version: document ref, bindings map, locked items; versioned, immutable-once-used) · `template_run` (template version, input rows ref, per-row status + output hashes).
 
 ## 11. Milestones
 
@@ -226,7 +242,7 @@ Stack choices follow the established house pattern: FastAPI microservices in Doc
 | **M1 — Generation loop** (wks 3–5) | GEN-1..7, VAL-1..4, VAL-6..7, BRAND-1..2, ADM-1..2 | Brief JSON → 6 validated concepts with self-critique loop, fully via API — **met 11 Jun 2026** ($1.56/brief, owner sign-off; ADM-1 dashboards deferred to M2 UI — per-version cost metering live) |
 | **M2 — Internal MVP UI** (wks 6–9) | AUTH-1/3, BRF-1..2, REV-1..3, EXP-1, BRAND-3 | Alex's team runs a real brief end-to-end internally |
 | **M3 — Client review + handoff** (wks 10–14) | AUTH-2/4, REV-5..7/9, VAR-1..2, EXP-2..3, PRD-1..3, BRF-4 | A live client review and a released job through PitStop/Phoenix |
-| **M4 — Scale & craft** (ongoing) | Phase 3 items by demand | — |
+| **M4 — Scale & craft** (ongoing) | Phase 3 items by demand — TPL-1..3 + EXP-5 first (all SQLite-compatible; candidates to pull forward once M2 auth lands if a volume job appears) | — |
 
 Build sequence within each milestone follows atomic decomposition; requirement IDs above map 1:1 to task manifests.
 
@@ -245,7 +261,7 @@ Build sequence within each milestone follows atomic decomposition; requirement I
 | Prompt injection via client comments/uploads | GEN-9 human-promotion boundary; client text always data, never instruction |
 | Liveblocks dependency for client-facing reviews | Acceptable for v1; comments persisted to Postgres so realtime layer is replaceable |
 
-**Open questions:** approval gate semantics (single approver vs quorum per client?) · where the craft pass most often happens (Scribus vs IDML/InDesign — affects RND-7 priority) · whether LetsMakeVM 3D renders feed briefs as references (likely yes — convergence point) · commercial model if offered client-direct vs internal-only tooling.
+**Open questions:** approval gate semantics (single approver vs quorum per client?) · where the craft pass most often happens (Scribus vs IDML/InDesign — affects RND-7 priority) · whether LetsMakeVM 3D renders feed briefs as references (likely yes — convergence point) · commercial model if offered client-direct vs internal-only tooling · whether a hosted craft pass (containerised Scribus streamed to the browser via Xpra/noVNC, embedded in the review UI) is worth the ops weight over the EXP-6/7 local-install path — zero designer setup and server-side files, but real streaming latency on canvas work; revisit after EXP-5..7 usage data.
 
 ## 13. Appendices
 
@@ -262,3 +278,4 @@ JSON document → Python compiler (stdlib-only, donor-template architecture) →
 | 0.2 | 11 Jun 2026 | See **Changes in v0.2** at top |
 | 0.3 | 11 Jun 2026 | M0 exit recorded; spot-separation risk closed; PDF/X-4 default; RND-4 measurements |
 | 0.4 | 11 Jun 2026 | M1 exit recorded (live costs, escalation verified); GEN-6/7 + VAL-7 live; M2 slice 1 shipped |
+| 0.5 | 16 Jul 2026 | §7.12 TPL family (templates & volume production, post-CHILI-GraFx study); EXP-5..7 seamless craft pass; `template` entity; hosted-Scribus open question |
