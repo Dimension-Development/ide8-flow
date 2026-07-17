@@ -78,6 +78,10 @@ export default function ConceptDetail({
             <div className="flex gap-2">
               <DownloadLink href={api.slaUrl(selected.id)} label=".sla" />
               <DownloadLink href={api.documentUrl(selected.id)} label=".json" />
+              <DownloadLink
+                href={api.bundleUrl(selected.id)}
+                label="bundle (.sla + assets)"
+              />
               {selected.has_proof && (
                 <DownloadLink
                   href={api.proofUrl(selected.id)}

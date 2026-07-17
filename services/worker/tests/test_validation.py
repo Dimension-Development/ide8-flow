@@ -93,6 +93,20 @@ class TestEndToEnd(unittest.TestCase):
 
     # ---- VAL-3 geometry ----
 
+    def test_multiplier_lineheight_is_flagged(self):
+        # CSS habit: lineHeight 1.2 on 48pt type = 1.2pt leading — every
+        # line stacks on the same baseline (found live, Harvest A/B run)
+        self.doc["paraStyles"][0]["lineHeight"] = 1.2
+        report = self.validate()
+        self.assertIn("lineheight-not-points", codes(report))
+        self.assertFalse(report["ok"])
+
+    def test_points_lineheight_and_omitted_are_clean(self):
+        self.doc["paraStyles"][0]["lineHeight"] = 52
+        self.assertNotIn("lineheight-not-points", codes(self.validate()))
+        del self.doc["paraStyles"][0]["lineHeight"]
+        self.assertNotIn("lineheight-not-points", codes(self.validate()))
+
     def test_out_of_bounds(self):
         self.doc["pages"][0]["items"][0]["frame"] = [-50, 0, 700, 100]
         self.assertIn("out-of-bounds", codes(self.validate()))

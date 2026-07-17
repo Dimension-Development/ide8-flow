@@ -1,0 +1,33 @@
+# ide8.flow full stack — render + worker + review UI.
+#   ANTHROPIC_API_KEY=sk-... docker compose up --build
+# UI on :8080, worker API on :8200, render on :8127.
+services:
+  render:
+    build: services/render
+    ports:
+      - "8127:8000"
+
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    environment:
+      # required for /generate and /mutate; browse/review works without it
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      RENDER_URL: http://render:8000
+    volumes:
+      - worker-data:/data
+    ports:
+      - "8200:8200"
+    depends_on:
+      - render
+
+  ui:
+    build: services/ui
+    ports:
+      - "8080:80"
+    depends_on:
+      - worker
+
+volumes:
+  worker-data:

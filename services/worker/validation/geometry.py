@@ -32,6 +32,25 @@ def check(document, profile):
     def warn(code, path, message):
         warnings.append({"code": code, "path": path, "message": message})
 
+    # lineHeight is ABSOLUTE POINTS (SCHEMA.md §paraStyles) — models trained
+    # on CSS habitually emit multipliers (1.2), which compile to 1.2pt leading
+    # and pile every line onto the same baseline. Found live 16 Jul 2026: it
+    # garbled all 12 Harvest A/B concepts' multi-line text and zeroed the
+    # critique pass rate. A ratio-looking value is an error so the GEN-3
+    # repair loop fixes it, not a warning a human has to spot in the proof.
+    char_sizes = {cs.get("name"): cs.get("size", 12)
+                  for cs in document.get("charStyles", [])}
+    for i, ps in enumerate(document.get("paraStyles", [])):
+        lh = ps.get("lineHeight")
+        if lh is None:
+            continue  # automatic leading
+        size = char_sizes.get(ps.get("charStyle"), 12)
+        if lh < size * 0.5:
+            err("lineheight-not-points", f"paraStyles[{i}].lineHeight",
+                f"lineHeight {lh} looks like a multiplier — lineHeight is "
+                f"absolute points; for {size}pt type write ≈{round(size * (lh if lh > 0.6 else 1.2), 1)} "
+                f"or omit it for automatic leading")
+
     page = document.get("page", {})
     w, h = page_dims(page)
     bleed = page.get("bleed", 0)

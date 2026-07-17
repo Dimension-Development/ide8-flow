@@ -43,7 +43,11 @@ CMYK values are 0–100, RGB 0–255. Objects and styles reference swatches by n
 `{name, charStyle, align, lineHeight?, spaceBefore?, spaceAfter?, indent?, firstIndent?}`
 
 - `align` — `left` | `center` | `right` | `justify` | `force`.
-- Omitting `lineHeight` selects automatic leading.
+- `lineHeight` is **absolute points**, never a CSS-style multiplier: 48pt
+  display type wants `lineHeight` ≈ 52, not 1.1. A multiplier-looking value
+  compiles to ~1pt leading and stacks every line on the same baseline
+  (validated as `lineheight-not-points`, VAL-3). Omitting `lineHeight`
+  selects automatic leading.
 - `spaceBefore`/`spaceAfter` compile to the legacy German attributes `VOR`/`NACH`.
 - `charStyle` links via `CPARENT`.
 
