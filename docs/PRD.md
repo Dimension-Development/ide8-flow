@@ -4,10 +4,12 @@
 
 | | |
 |---|---|
-| Version | 0.5 |
-| Date | 16 July 2026 |
+| Version | 0.6 |
+| Date | 17 July 2026 |
 | Owner | Luke — Print Services Director, Dimension Development Ltd |
 | Status | In development. M0 + M1 complete; M2 (internal MVP UI) in progress |
+
+**Changes in v0.6** — Cherry-picked from an external product review (Grok Build, 17 Jul 2026): §7.13 VEC family (SVG ingest + brand recolour — closes Harvest gap D1 — and generative vector motifs as first-class document items; `shape.d` already carries the geometry, so motifs are prompt/validation work, not schema work) · GEN-10 creative axes (structured diversity parameters exposed as UI chips; A→B structural morphing explicitly rejected as research-grade) · GEN-11 reference → layout DNA (vision extracts a structural skeleton from a reference image; never pixel style transfer) · REV-10 client safe-levers (preset shifts inside the brand envelope; free client prompting stays prohibited per GEN-9) · VAL-3 die-cut note (closed dielines vs open creases — Harvest gap F1). Rejected from the same review: concept morphing, reverse-compile of arbitrary studio files, and its stale recommendations (failed-concept surfacing already shipped; templates/VDP already §7.12).
 
 **Changes in v0.5** — Templates & volume production added as §7.12 (TPL-1..5), formalising the Phase-3 "template/kit system" after a study of CHILI GraFx: approved concepts promote to slot-bound templates; bind-and-render is deterministic and LLM-free, making volume/VDP output near-zero marginal cost. Animated/digital-channel output and canvas (WYSIWYG) editing explicitly rejected — NL mutation + slot forms remain the editing surface · Craft-pass seamlessness added to EXP (EXP-5 asset-complete bundle, EXP-6 one-click open in Scribus, EXP-7 return-to-platform from inside Scribus) — EXP-3 round-trip is the anchor; these remove its friction · `template` entity added to §10 · hosted-Scribus-in-browser recorded as an open question.
 
@@ -67,7 +69,7 @@ Brief intake, generation loop, validation, proof grid with comments, manual expo
 External reviewer access, approval gates, PDF/X packaging into Phoenix/PitStop via n8n, Monday.com sync.
 
 ### Phase 3 — Scale & craft
-IDML export, chained text frames, image/asset library, house-style image generation hooks (ComfyUI/FLUX), template/kit system (§7.12 TPL), volume/VDP production, analytics.
+IDML export, chained text frames, image/asset library, house-style image generation hooks (ComfyUI/FLUX), template/kit system (§7.12 TPL), volume/VDP production, vector assets & generative motifs (§7.13 VEC), creative axes + reference-to-DNA (GEN-10/11), analytics.
 
 **Out of scope (all phases):** raster image editing, general-purpose page layout UI (no drawing tools — by design), video/motion, e-commerce artwork, fully autonomous (human-gate-free) production release.
 
@@ -119,6 +121,8 @@ IDs are stable for task decomposition. Priority: **P0** = MVP-blocking, **P1** =
 - **GEN-7 (P0)** Mutation API: natural-language instruction + target concept → document diff → new version. Surface a before/after proof pair.
 - **GEN-8 (P1)** "More like this": seed fan-out from an existing concept.
 - **GEN-9 (P2)** Comment-driven regeneration: a client comment can be promoted to a mutation instruction by internal staff (never auto-executed from client input — prompt-injection boundary).
+- **GEN-10 (P2)** Creative axes: fan-out diversity as named, structured parameters (e.g. hierarchy: type/image/price-hero; density; geometry; colour-field weight) exposed as UI chips and composable with GEN-8 ("more like #3, wilder geometry"). Axes condition the prompt; VAL stays the fitness function. Explicitly out of scope: structural interpolation ("morphing") between concepts — regeneration with steering, never geometry blending.
+- **GEN-11 (P2)** Reference → layout DNA: a vision pass over an uploaded reference image (competitor unit, past winner, LetsMakeVM still) extracts a *structural* skeleton — bands, hero zone, type hierarchy, lockup region — emitted as a document skeleton that brief + brand profile then fill through the normal loop. Never pixel/style transfer; references convert to geometry only.
 
 ### 7.5 Validation layer (VAL)
 
@@ -126,7 +130,7 @@ Deterministic, ordered cheapest-first. VAL-1..5 run pre-render; VAL-6 reads back
 
 - **VAL-1 (P0)** Document-schema conformance (formal JSON Schema).
 - **VAL-2 (P0)** Brand conformance: swatch whitelist, font whitelist, min type sizes.
-- **VAL-3 (P0)** Geometry: frames within page+bleed bounds; safe-zone intrusion warnings; cut paths (`spot` stroke) must be open paths with stroke-only, no fill.
+- **VAL-3 (P0)** Geometry: frames within page+bleed bounds; safe-zone intrusion warnings; cut paths (`spot` stroke) must be open paths with stroke-only, no fill. *(Known over-restriction — Harvest gap F1: a shaped die (round wobbler, sealed contour) is inherently closed. Planned relaxation: a `role: "cut" | "crease"` field on path items — dies may close, creases must stay open. Lands with the VEC schema work.)*
 - **VAL-4 (P0)** Contrast: computed text colour vs underlying fill colour ≥ profile floor (catches invisible-text class of failure without a vision call).
 - **VAL-5 (P1)** Copy integrity: all mandatory copy-deck strings present verbatim; legal text unaltered.
 - **VAL-6 (P0)** Overflow detection post-render: the text-frame overflow flag is read back from Scribus during proof render and treated as a hard failure. *(Promoted from P1: overflow is the most common LLM layout failure, the flag is free at render time, and catching it deterministically saves vision-loop tokens — serving the §8 cost target.)*
@@ -154,6 +158,7 @@ Deterministic, ordered cheapest-first. VAL-1..5 run pre-render; VAL-6 reads back
 - **REV-7 (P1)** Status workflow: `draft → internal_review → client_review → approved → released` mirrored to Monday.com.
 - **REV-8 (P2)** @mentions and notification digests (email via n8n).
 - **REV-9 (P1)** Audit log view: every version, comment, approval, export per project.
+- **REV-10 (P2)** Client safe-levers: preset creative shifts ("more premium", "more festive", "more value") available in client review mode, implemented as internal GEN-10 axis presets inside the brand envelope. Clients never free-prompt (GEN-9 boundary holds); every lever pull records full provenance like any generation.
 
 ### 7.8 Variant engine (VAR)
 
@@ -195,6 +200,33 @@ Formalises the Phase-3 "template/kit system", cherry-picked from a study of CHIL
 - **TPL-4 (P2)** Deterministic copyfitting: bound text that overflows steps the font size down within a template-declared minimum; below minimum is a per-row validation failure, never silent truncation.
 - **TPL-5 (P2)** Slot-form editing in the review UI: a form over a template's bindings with live re-rendered proof — constrained editing for non-designers without a layout canvas.
 - **TPL-6 (P2)** Locked items are enforced in the mutation loop: a GEN-7 mutation whose structural diff touches a locked item is rejected before persistence.
+
+### 7.13 Vector assets & motifs (VEC)
+
+Cherry-picked from the Grok Build review (17 Jul 2026). The premise it got
+right: every other tool's AI art is a raster frame; here vector art can be
+first-class document items — named, swatch-bound, scale-invariant,
+versioned with the same provenance as layout. The foundation already
+exists: `shape` items carry SVG path syntax in `d`, which is also the
+geometry LLMs author most fluently.
+
+- **VEC-1 (P1)** SVG ingest (closes Harvest gap D1): upload a vector logo/
+  asset; a constrained SVG subset (paths, basic shapes, groups, flat fills)
+  parses into named `shape`/`path` items. Unsupported constructs (raster
+  embeds, filters, gradients until modelled) reject with `{code, path,
+  message}` — never silent degradation.
+- **VEC-2 (P1)** Brand recolour on ingest: imported vector fills remap to
+  profile swatches (nearest-match with a mapping report; off-palette
+  colours require an explicit mapping or fail VAL-2). A recoloured logo is
+  a normal document fragment thereafter.
+- **VEC-3 (P2)** Generative motifs: a prompt-pack tool emits brand-bound
+  vector ornament ("harvest leaf flourish in CopperSpot") as `shape` items
+  through the standard loop — VAL geometry/brand gates apply, mutation
+  edits path `d` instead of regenerating pixels. Prompt/validation work,
+  not schema work.
+- **VEC-4 (P2)** Parametric motif families: recurring ornament stored as a
+  named per-brand library (seasonal systems) the generator composes from,
+  rather than inventing from noise each run.
 
 ## 8. Non-functional requirements
 
@@ -279,3 +311,4 @@ JSON document → Python compiler (stdlib-only, donor-template architecture) →
 | 0.3 | 11 Jun 2026 | M0 exit recorded; spot-separation risk closed; PDF/X-4 default; RND-4 measurements |
 | 0.4 | 11 Jun 2026 | M1 exit recorded (live costs, escalation verified); GEN-6/7 + VAL-7 live; M2 slice 1 shipped |
 | 0.5 | 16 Jul 2026 | §7.12 TPL family (templates & volume production, post-CHILI-GraFx study); EXP-5..7 seamless craft pass; `template` entity; hosted-Scribus open question |
+| 0.6 | 17 Jul 2026 | §7.13 VEC family, GEN-10/11, REV-10, VAL-3 die-cut note — cherry-picked from external review (Grok Build); morphing + reverse-compile rejected |
