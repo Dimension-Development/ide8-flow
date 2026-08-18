@@ -51,9 +51,20 @@ def fonts():
 
 
 @app.post("/compile")
-def compile_document(document: dict = Body(...)):
+def compile_document(payload: dict = Body(...)):
+    # Plain document bodies remain the original API.  The worker supplies an
+    # envelope only when it has trusted asset dimensions for deterministic
+    # 0.2 contain/cover placement.
+    if "document" in payload:
+        document = payload["document"]
+        image_meta = payload.get("image_meta")
+    else:
+        document = payload
+        image_meta = None
+    if not isinstance(document, dict):
+        raise HTTPException(status_code=400, detail="document must be an object")
     try:
-        data = compile_to_bytes(document, TEMPLATE)
+        data = compile_to_bytes(document, TEMPLATE, image_meta=image_meta)
     except CompileError as e:
         return JSONResponse(status_code=422, content={"ok": False, "errors": e.errors})
     except DonorError as e:

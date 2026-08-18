@@ -1,0 +1,22 @@
+{
+  "brand": "BYOMA",
+  "intakeVersion": "replace-with-approved-version",
+  "owner": "replace-with-design-owner",
+  "files": [
+    {
+      "name": "replace-with-kebab-case-name",
+      "path": "brand/logos/replace-with-file.ext",
+      "role": "primary-logo|reversed-logo|mark|hero-image|product-image|font",
+      "version": "replace-with-source-version",
+      "owner": "replace-with-rights-owner",
+      "licence": "replace-with-licence-and-usage-scope",
+      "serverEmbeddingPermitted": false,
+      "colourSpace": "RGB|CMYK|Gray|spot|n/a",
+      "widthPx": null,
+      "heightPx": null,
+      "resolutionPpi": null,
+      "sha256": "replace-with-lowercase-sha256",
+      "notes": "approval, expiry, territory, or conversion constraints"
+    }
+  ]
+}

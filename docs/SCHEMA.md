@@ -1,5 +1,10 @@
 # ide8.flow document schema — reference v0.1
 
+> **Version index:** this file is the immutable `0.1` reference. New documents
+> may opt into [`0.2`](./SCHEMA-0.2.md), whose formal schema adds gradients,
+> shape/image opacity and deterministic image placement. A stored document
+> always replays under the schema version recorded in its own `version` field.
+
 **Normative spec** for the document JSON that the generation engine authors and the compiler consumes (PRD §13.2). The formal JSON Schema is [`schema/document-0.1.schema.json`](../schema/document-0.1.schema.json) (VAL-1); this file remains the human-readable contract — the two must not drift. Compiler implementation notes (donor template, scratch-space translation, PTYPE defaults) live in the spike README alongside `sla_compiler.py`.
 
 ## Terminology

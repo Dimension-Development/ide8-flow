@@ -73,8 +73,8 @@ class FakeRender:
         self.compiled = []
         self.last_assets = None
 
-    def compile(self, document):
-        self.compiled.append(document)
+    def compile(self, document, image_meta=None):
+        self.compiled.append((document, image_meta))
         return b"<SCRIBUSUTF8NEW/>"
 
     def proof_meta(self, sla_bytes, dpi=120, assets=None):
@@ -224,8 +224,10 @@ class TestLoop(unittest.TestCase):
         self.assertTrue(r.approved)
         self.assertEqual(render.last_assets,
                          {"assets/logo-primary.png": png})
-        staged_item = render.compiled[0]["pages"][0]["items"][-1]
+        staged_item = render.compiled[0][0]["pages"][0]["items"][-1]
         self.assertEqual(staged_item["src"], "assets/logo-primary.png")
+        self.assertEqual(render.compiled[0][1], {
+            "assets/logo-primary.png": {"width": 120, "height": 80}})
         # the PERSISTED document keeps the asset NAME, not the staged path
         self.assertEqual(
             r.document["pages"][0]["items"][-1]["src"], "logo-primary")

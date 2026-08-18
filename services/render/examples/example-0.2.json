@@ -1,0 +1,137 @@
+{
+  "version": "0.2",
+  "meta": {
+    "title": "Synthetic agency-card vocabulary example"
+  },
+  "page": {
+    "size": [425.19685, 425.19685],
+    "orientation": "portrait",
+    "margins": [17.007874, 17.007874, 17.007874, 17.007874],
+    "bleed": 8.503937
+  },
+  "swatches": [
+    {
+      "name": "ExamplePink",
+      "space": "cmyk",
+      "values": [0, 88, 12, 0]
+    },
+    {
+      "name": "ExampleYellow",
+      "space": "cmyk",
+      "values": [0, 4, 90, 0]
+    },
+    {
+      "name": "ExampleInk",
+      "space": "cmyk",
+      "values": [70, 55, 30, 80]
+    },
+    {
+      "name": "ExamplePaper",
+      "space": "cmyk",
+      "values": [0, 0, 0, 0]
+    },
+    {
+      "name": "CutContour",
+      "space": "cmyk",
+      "values": [0, 100, 0, 0],
+      "spot": true
+    }
+  ],
+  "charStyles": [
+    {
+      "name": "ExampleHeadlineChar",
+      "font": "Liberation Sans Bold",
+      "size": 28,
+      "color": "ExampleInk"
+    },
+    {
+      "name": "ExampleBodyChar",
+      "font": "Liberation Sans Regular",
+      "size": 10,
+      "color": "ExampleInk"
+    }
+  ],
+  "paraStyles": [
+    {
+      "name": "ExampleHeadline",
+      "charStyle": "ExampleHeadlineChar",
+      "align": "left",
+      "lineHeight": 32
+    },
+    {
+      "name": "ExampleBody",
+      "charStyle": "ExampleBodyChar",
+      "align": "left",
+      "lineHeight": 14
+    }
+  ],
+  "pages": [
+    {
+      "items": [
+        {
+          "type": "shape",
+          "name": "gradient-background",
+          "frame": [-8.503937, -8.503937, 442.204724, 442.204724],
+          "fill": {
+            "type": "linear-gradient",
+            "start": [0, 0.5],
+            "end": [1, 0.5],
+            "stops": [
+              {"at": 0, "color": "ExamplePink"},
+              {"at": 1, "color": "ExampleYellow"}
+            ]
+          }
+        },
+        {
+          "type": "image",
+          "name": "synthetic-model",
+          "frame": [0, 0, 212.598425, 425.19685],
+          "src": "synthetic-model-cutout",
+          "fit": "cover",
+          "focus": [0.42, 0.35],
+          "zoom": 1.1
+        },
+        {
+          "type": "shape",
+          "name": "rounded-star-motif",
+          "frame": [178, 28, 54, 54],
+          "fill": "ExamplePaper",
+          "opacity": 0.5,
+          "d": "M27 0 C30 10 34 18 44 10 C36 20 44 24 54 27 C44 30 36 34 44 44 C34 36 30 44 27 54 C24 44 20 36 10 44 C18 34 10 30 0 27 C10 24 18 20 10 10 C20 18 24 10 27 0 Z"
+        },
+        {
+          "type": "text",
+          "name": "headline",
+          "frame": [232, 80, 164, 92],
+          "paragraphs": [
+            {
+              "style": "ExampleHeadline",
+              "text": "A STRUCTURED DESIGN EXAMPLE"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "name": "body-copy",
+          "frame": [232, 190, 164, 110],
+          "paragraphs": [
+            {
+              "style": "ExampleBody",
+              "text": "Synthetic copy demonstrates hierarchy only. It is not client or brand content."
+            }
+          ]
+        },
+        {
+          "type": "path",
+          "name": "production-separation-test",
+          "frame": [0, 0, 425.19685, 425.19685],
+          "d": "M0 0 L425.19685 0 L425.19685 425.19685 L0 425.19685",
+          "stroke": {
+            "color": "CutContour",
+            "width": 0.5
+          }
+        }
+      ]
+    }
+  ]
+}

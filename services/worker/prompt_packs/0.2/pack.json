@@ -1,0 +1,13 @@
+{
+  "name": "pos-concepts",
+  "version": "0.2",
+  "description": "POS artwork concept generation with controlled gradients, opacity and image placement",
+  "archetypes": [
+    "Hero split: dominant full-bleed colour field top two-thirds carrying the headline, calm structured info band below",
+    "Type-led poster: headline as the artwork - oversized, tightly cropped typography; minimal supporting elements",
+    "Diagonal energy: angled colour panels or shapes driving the eye from headline to call-out; dynamic asymmetry",
+    "Framed classic: generous margins, centred composition, thin keyline frame; premium and restrained",
+    "Stacked banding: full-width horizontal bands alternating colour/cream; copy lives in its own band; strong rhythm",
+    "Corner anchor: visual weight pinned to one corner with copy cascading from it; bold use of empty space"
+  ]
+}

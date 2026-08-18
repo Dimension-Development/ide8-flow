@@ -35,13 +35,14 @@ import argparse
 import io
 import itertools
 import json
+import math
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 # ---------------------------------------------------------------- constants
 
-SUPPORTED_VERSIONS = {"0.1"}
+SUPPORTED_VERSIONS = {"0.1", "0.2"}
 
 SCRATCH_X = 100.0   # where Scribus places page x in scratch space
 SCRATCH_Y = 20.0    # first page y
@@ -156,9 +157,186 @@ def _is_frame(v):
             and all(isinstance(n, (int, float)) for n in v))
 
 
+def _is_number(v):
+    return (isinstance(v, (int, float)) and not isinstance(v, bool)
+            and math.isfinite(v))
+
+
+def _is_point(v):
+    return (isinstance(v, (list, tuple)) and len(v) == 2
+            and all(_is_number(n) and 0 <= n <= 1 for n in v))
+
+
+def _gradient_stops(fill):
+    stops = fill.get("stops") if isinstance(fill, dict) else None
+    return stops if isinstance(stops, list) else []
+
+
+def _validate_gradient(fill, path, known_colors, frame, err):
+    """Validate 0.2 gradient semantics that JSON Schema cannot express.
+
+    The compiler endpoint can be called directly, so it also guards the basic
+    shape rather than assuming the worker's formal-schema gate already ran.
+    """
+    if not isinstance(fill, dict):
+        err("bad-gradient", path,
+            "fill must be a swatch name or a linear/radial gradient object")
+        return
+
+    kind = fill.get("type")
+    if kind not in ("linear-gradient", "radial-gradient"):
+        err("bad-gradient", f"{path}.type",
+            'must be "linear-gradient" or "radial-gradient"')
+
+    stops = fill.get("stops")
+    if not isinstance(stops, list) or not 2 <= len(stops) <= 16:
+        err("bad-gradient", f"{path}.stops",
+            "must contain between 2 and 16 gradient stops")
+        stops = []
+
+    positions = []
+    for i, stop in enumerate(stops):
+        sp = f"{path}.stops[{i}]"
+        if not isinstance(stop, dict):
+            err("bad-gradient", sp, "gradient stop must be an object")
+            continue
+        at = stop.get("at")
+        color = stop.get("color")
+        if not _is_number(at) or not 0 <= at <= 1:
+            err("bad-gradient", f"{sp}.at", "must be a number from 0 to 1")
+        else:
+            positions.append((i, float(at)))
+        if not isinstance(color, str) or not color:
+            err("bad-gradient", f"{sp}.color",
+                "must be a non-empty swatch name")
+        elif color not in known_colors:
+            err("unknown-swatch", f"{sp}.color",
+                f'"{color}" is not a defined swatch')
+
+    if positions:
+        if positions[0][1] != 0 or positions[-1][1] != 1:
+            err("gradient-stop-endpoints", f"{path}.stops",
+                "first gradient stop must be 0 and last must be 1")
+        for (previous_i, previous), (current_i, current) in zip(
+                positions, positions[1:]):
+            if current < previous:
+                err("gradient-stop-order",
+                    f"{path}.stops[{current_i}].at",
+                    f"stop {current_i} ({current}) is before stop "
+                    f"{previous_i} ({previous})")
+
+    if kind == "linear-gradient":
+        start, end = fill.get("start"), fill.get("end")
+        if not _is_point(start):
+            err("bad-gradient", f"{path}.start",
+                "must be a normalised [x, y] point")
+        if not _is_point(end):
+            err("bad-gradient", f"{path}.end",
+                "must be a normalised [x, y] point")
+        if _is_point(start) and _is_point(end) and list(start) == list(end):
+            err("bad-gradient", path,
+                "linear gradient start and end must be different")
+
+    elif kind == "radial-gradient":
+        center = fill.get("center")
+        focal = fill.get("focal", center)
+        radius = fill.get("radius")
+        if not _is_point(center):
+            err("bad-gradient", f"{path}.center",
+                "must be a normalised [x, y] point")
+        if not _is_point(focal):
+            err("bad-gradient", f"{path}.focal",
+                "must be a normalised [x, y] point")
+        if not _is_number(radius) or not 0 < radius <= 2:
+            err("bad-gradient", f"{path}.radius",
+                "must be greater than 0 and at most 2")
+        if (_is_frame(frame) and _is_point(center) and _is_point(focal)
+                and _is_number(radius) and radius > 0):
+            _, _, width, height = frame
+            dx = (focal[0] - center[0]) * width
+            dy = (focal[1] - center[1]) * height
+            if math.hypot(dx, dy) >= radius * min(width, height):
+                err("bad-gradient", f"{path}.focal",
+                    "radial focal point must lie strictly inside the radius")
+
+
 # ---------------------------------------------------------------- validation
 
-def validate_document(document, donor_colors, donor_charstyles, donor_parastyles):
+def _image_dimensions(image_meta, src):
+    """Return trusted source dimensions, or a stable validation error code.
+
+    Asset metadata is transient compiler input rather than part of the document
+    vocabulary.  It is intentionally keyed by the worker-staged PFILE path.
+    """
+    if not isinstance(image_meta, dict) or src not in image_meta:
+        return None, "image-dimensions-required"
+    meta = image_meta[src]
+    if not isinstance(meta, dict):
+        return None, "bad-image-dimensions"
+    width, height = meta.get("width"), meta.get("height")
+    if (not _is_number(width) or not _is_number(height)
+            or width <= 0 or height <= 0):
+        return None, "bad-image-dimensions"
+    return (float(width), float(height)), None
+
+
+def _image_placement(item, image_meta):
+    """Calculate the harvested Scribus image mapping for a 0.2 image item.
+
+    Returns attribute overrides or `(None, error_code, message)`.  All offset
+    calculations are in source pixels because that is Scribus' SLA unit for
+    LOCALX/Y; LOCALSCX/Y are points per source pixel.
+    """
+    fit = item.get("fit", "contain")
+    if fit not in ("contain", "cover", "stretch"):
+        return None, "bad-image-placement", 'fit must be "contain", "cover" or "stretch"'
+
+    focus = item.get("focus", [0.5, 0.5])
+    zoom = item.get("zoom", 1)
+    if fit != "cover" and ("focus" in item or "zoom" in item):
+        return None, "bad-image-placement", "focus and zoom are valid only with cover"
+    if fit == "cover":
+        if not _is_point(focus):
+            return None, "bad-image-placement", "focus must be a normalised [x, y] point"
+        if not _is_number(zoom) or not 1 <= zoom <= 8:
+            return None, "bad-image-placement", "zoom must be a finite number from 1 to 8"
+
+    source, code = _image_dimensions(image_meta, item.get("src"))
+    if code:
+        message = ("image placement requires trusted source image dimensions"
+                   if code == "image-dimensions-required" else
+                   "source image dimensions must be finite positive numbers")
+        return None, code, message
+
+    sw, sh = source
+    _, _, fw, fh = item["frame"]
+    if not _is_number(fw) or not _is_number(fh) or fw <= 0 or fh <= 0:
+        return None, "bad-image-placement", "image frame width and height must be positive"
+    if fit == "stretch":
+        return {
+            "SCALETYPE": "0", "RATIO": "0",
+            "LOCALSCX": f(fw / sw), "LOCALSCY": f(fh / sh),
+            "LOCALX": "0", "LOCALY": "0",
+        }, None, None
+    if fit == "contain":
+        scale = min(fw / sw, fh / sh)
+        offset_x = (fw - sw * scale) / 2
+        offset_y = (fh - sh * scale) / 2
+    else:
+        scale = max(fw / sw, fh / sh) * zoom
+        wanted_x = fw / 2 - focus[0] * sw * scale
+        wanted_y = fh / 2 - focus[1] * sh * scale
+        offset_x = min(0, max(fw - sw * scale, wanted_x))
+        offset_y = min(0, max(fh - sh * scale, wanted_y))
+    return {
+        "SCALETYPE": "1", "RATIO": "1",
+        "LOCALSCX": f(scale), "LOCALSCY": f(scale),
+        "LOCALX": f(offset_x / scale), "LOCALY": f(offset_y / scale),
+    }, None, None
+
+
+def validate_document(document, donor_colors, donor_charstyles, donor_parastyles,
+                      image_meta=None):
     """Structural validation. Returns ALL errors, not just the first."""
     errors = []
 
@@ -246,8 +424,29 @@ def validate_document(document, donor_colors, donor_charstyles, donor_parastyles
                 err("bad-frame", f"{p}.frame", "must be [x, y, w, h] in points")
 
             fill = item.get("fill")
-            if fill and fill not in known_colors:
-                err("unknown-swatch", f"{p}.fill", f'"{fill}" is not a defined swatch')
+            if "fill" in item:
+                if isinstance(fill, str):
+                    if fill not in known_colors:
+                        err("unknown-swatch", f"{p}.fill",
+                            f'"{fill}" is not a defined swatch')
+                elif version == "0.2":
+                    _validate_gradient(fill, f"{p}.fill", known_colors,
+                                       item.get("frame"), err)
+                else:
+                    err("unsupported-feature", f"{p}.fill",
+                        "gradient fills require document version 0.2")
+
+            if "opacity" in item:
+                opacity = item.get("opacity")
+                if version != "0.2":
+                    err("unsupported-feature", f"{p}.opacity",
+                        "item opacity requires document version 0.2")
+                elif kind not in ("shape", "image"):
+                    err("bad-opacity", f"{p}.opacity",
+                        "opacity is supported on shape and image items only")
+                elif not _is_number(opacity) or not 0 <= opacity <= 1:
+                    err("bad-opacity", f"{p}.opacity",
+                        "must be a finite number from 0 to 1")
             stroke = item.get("stroke")
             if stroke:
                 sc = stroke.get("color", "Black")
@@ -260,7 +459,7 @@ def validate_document(document, donor_colors, donor_charstyles, donor_parastyles
                     err("missing-field", f"{p}.d", "path needs SVG path data")
                 if not stroke:
                     err("missing-field", f"{p}.stroke", "path needs a stroke")
-                if fill:
+                if "fill" in item:
                     err("invalid-fill", f"{p}.fill",
                         "paths are stroke-only — no fill (cut/crease paths, VAL-3)")
 
@@ -294,6 +493,10 @@ def validate_document(document, donor_colors, donor_charstyles, donor_parastyles
             elif kind == "image":
                 if not item.get("src"):
                     err("missing-field", f"{p}.src", "image needs a source path")
+                elif version == "0.2":
+                    _, code, message = _image_placement(item, image_meta)
+                    if code:
+                        err(code, f"{p}.fit", message)
 
     return errors
 
@@ -411,7 +614,62 @@ def emit_story(po_el, paragraphs):
         ET.SubElement(story, tag, {"PARENT": style})
 
 
-def emit_item(doc_el, item, item_id, page_no, page_pos):
+def apply_fill(attrs, fill, width, height):
+    """Apply a solid or validated 0.2 gradient fill to PAGEOBJECT attrs."""
+    if isinstance(fill, str):
+        attrs["PCOLOR"] = fill
+        return
+    if not isinstance(fill, dict):
+        return
+
+    stops = _gradient_stops(fill)
+    if stops:
+        # PCOLOR is a non-gradient fallback; Scribus renders the CSTOP list.
+        attrs["PCOLOR"] = stops[0]["color"]
+    attrs.update({"GRSCALE": "1", "GRSKEW": "0", "GRExt": "3"})
+
+    if fill["type"] == "linear-gradient":
+        start, end = fill["start"], fill["end"]
+        attrs.update({
+            "GRTYP": "6",
+            "GRSTARTX": f(start[0] * width),
+            "GRSTARTY": f(start[1] * height),
+            "GRENDX": f(end[0] * width),
+            "GRENDY": f(end[1] * height),
+            # Ignored by Scribus for a linear gradient, but explicit and
+            # stable across reopen/save.
+            "GRFOCALX": "0",
+            "GRFOCALY": "0",
+        })
+    else:
+        center = fill["center"]
+        focal = fill.get("focal", center)
+        radius = fill["radius"] * min(width, height)
+        cx, cy = center[0] * width, center[1] * height
+        attrs.update({
+            "GRTYP": "7",
+            "GRSTARTX": f(cx),
+            "GRSTARTY": f(cy),
+            "GRENDX": f(cx + radius),
+            "GRENDY": f(cy),
+            "GRFOCALX": f(focal[0] * width),
+            "GRFOCALY": f(focal[1] * height),
+        })
+
+
+def emit_gradient_stops(po_el, fill):
+    if not isinstance(fill, dict):
+        return
+    for stop in _gradient_stops(fill):
+        ET.SubElement(po_el, "CSTOP", {
+            "RAMP": f(stop["at"]),
+            "NAME": stop["color"],
+            "SHADE": "100",
+            "TRANS": "1",
+        })
+
+
+def emit_item(doc_el, item, item_id, page_no, page_pos, version, image_meta=None):
     px, py = page_pos
     x, y, w, h = item["frame"]
     kind = item["type"]
@@ -428,8 +686,13 @@ def emit_item(doc_el, item, item_id, page_no, page_pos):
     if stroke:
         attrs["PCOLOR2"] = stroke.get("color", "Black")
         attrs["PWIDTH"] = f(stroke.get("width", 1))
-    if item.get("fill"):
-        attrs["PCOLOR"] = item["fill"]
+    if "fill" in item:
+        apply_fill(attrs, item["fill"], w, h)
+
+    if "opacity" in item:
+        attrs["TransValue"] = f(item["opacity"])
+        if stroke:
+            attrs["TransValueS"] = f(item["opacity"])
 
     if kind == "path":
         attrs["path"] = item["d"]
@@ -440,9 +703,19 @@ def emit_item(doc_el, item, item_id, page_no, page_pos):
 
     if kind == "image":
         attrs["PFILE"] = item.get("src", "")
-        fit = item.get("fit", "frame")
-        attrs["SCALETYPE"] = "1" if fit == "frame" else "0"
-        attrs["RATIO"] = "0" if item.get("stretch") else "1"
+        if version == "0.2":
+            placement, code, message = _image_placement(item, image_meta)
+            # validate_document() has already checked this.  Keep the guard
+            # here so direct future use of emit_item cannot silently emit a
+            # different mapping.
+            if code:
+                raise CompileError([{"code": code, "path": "image.fit",
+                                     "message": message}])
+            attrs.update(placement)
+        else:
+            fit = item.get("fit", "frame")
+            attrs["SCALETYPE"] = "1" if fit == "frame" else "0"
+            attrs["RATIO"] = "0" if item.get("stretch") else "1"
 
     if kind == "text":
         attrs["COLUMNS"] = str(item.get("columns", 1))
@@ -451,6 +724,7 @@ def emit_item(doc_el, item, item_id, page_no, page_pos):
         attrs["EXTRA"] = attrs["TEXTRA"] = attrs["BEXTRA"] = attrs["REXTRA"] = f(pad)
 
     po = ET.Element("PAGEOBJECT", attrs)
+    emit_gradient_stops(po, item.get("fill"))
     if kind == "text":
         emit_story(po, item["paragraphs"])
     doc_el.append(po)
@@ -477,7 +751,7 @@ def _donor_doc(template_path):
     return tree, doc
 
 
-def compile_sla(document, template_path):
+def compile_sla(document, template_path, image_meta=None):
     tree, doc = _donor_doc(template_path)
 
     errors = validate_document(
@@ -485,6 +759,7 @@ def compile_sla(document, template_path):
         donor_colors={c.get("NAME") for c in doc.findall("COLOR")},
         donor_charstyles={c.get("CNAME") for c in doc.findall("CHARSTYLE")},
         donor_parastyles={s.get("NAME") for s in doc.findall("STYLE")},
+        image_meta=image_meta,
     )
     if errors:
         raise CompileError(errors)
@@ -519,15 +794,16 @@ def compile_sla(document, template_path):
     ids = itertools.count(ITEM_ID_BASE)
     for n, pg in enumerate(pages):
         for item in pg.get("items", []):
-            emit_item(doc, item, next(ids), n, positions[n])
+            emit_item(doc, item, next(ids), n, positions[n],
+                      document["version"], image_meta=image_meta)
 
     return tree
 
 
-def compile_to_bytes(document, template_path):
+def compile_to_bytes(document, template_path, image_meta=None):
     """The single serialization path — CLI, tests, and the render service all
     emit through here, which is what makes byte-stability a testable claim."""
-    tree = compile_sla(document, template_path)
+    tree = compile_sla(document, template_path, image_meta=image_meta)
     ET.indent(tree, space=" ")
     buf = io.BytesIO()
     tree.write(buf, encoding="UTF-8", xml_declaration=True)

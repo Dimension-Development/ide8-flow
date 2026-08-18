@@ -14,9 +14,6 @@ if str(WORKER_ROOT) not in sys.path:
 from generation.loop import generate_concept  # noqa: E402
 from generation.mutation import mutate_document  # noqa: E402
 
-SCHEMA_VERSION = "0.1"
-
-
 def _asset_map(store):
     """All uploaded assets with bytes, keyed by name (RND-5)."""
     return {meta["name"]: store.get_asset(meta["name"])
@@ -44,7 +41,8 @@ def _failure_record(result):
 
 def generate_and_store(brief, *, n, store, client, render, pack,
                        schema_json, schema_path, profile, config=None,
-                       job_id=None):
+                       job_id=None, expected_version=None):
+    expected_version = expected_version or pack["version"]
     archetypes = pack["archetypes"]
     assets = _asset_map(store)
 
@@ -55,7 +53,7 @@ def generate_and_store(brief, *, n, store, client, render, pack,
             r = generate_concept(
                 brief, profile, archetype, client=client, render=render,
                 pack=pack, schema_json=schema_json, schema_path=schema_path,
-                config=config, assets=assets)
+                config=config, assets=assets, expected_version=expected_version)
         except Exception as e:  # noqa: BLE001 — one concept must not kill the job
             error = f"{type(e).__name__}: {e}"[:500]
             store.set_concept_failure(concept_id, {
@@ -74,7 +72,7 @@ def generate_and_store(brief, *, n, store, client, render, pack,
             import base64
             version_id = store.add_version(
                 concept_id, r.document,
-                schema_version=SCHEMA_VERSION,
+                schema_version=r.document["version"],
                 prompt_pack=pack["version"],
                 validation=r.validation or {},
                 model_history=r.model_history,
@@ -109,25 +107,27 @@ def generate_and_store(brief, *, n, store, client, render, pack,
 
 
 def mutate_and_store(version_id, instruction, *, store, client, render,
-                     pack, schema_json, schema_path, profile, config=None):
+                     pack, schema_json, schema_path, profile, config=None,
+                     expected_version=None):
     """GEN-7: load version -> mutate -> persist child version. Returns
     (new_version_id, MutationResult)."""
     parent = store.get_version(version_id)
     if parent is None:
         raise KeyError(f"unknown version {version_id}")
+    expected_version = expected_version or pack["version"]
 
     r = mutate_document(
         parent["document"], instruction, profile, client=client,
         render=render, pack=pack, schema_json=schema_json,
         schema_path=schema_path, config=config,
-        assets=_asset_map(store))
+        assets=_asset_map(store), expected_version=expected_version)
 
     new_id = None
     if r.document is not None:
         import base64
         new_id = store.add_version(
             parent["concept_id"], r.document,
-            schema_version=SCHEMA_VERSION,
+            schema_version=r.document["version"],
             prompt_pack=pack["version"],
             validation=r.validation or {},
             usage=r.usage,

@@ -27,17 +27,20 @@ import base64  # noqa: E402
 
 from assets import SAFE_NAME, resolve_srcs, sniff  # noqa: E402
 from brand import load_profile, merge_profile  # noqa: E402
-from generation import prompts  # noqa: E402
 from generation.loop import GenConfig  # noqa: E402
 from generation.metering import assert_all_priced  # noqa: E402
 from generation.render_client import RenderClient  # noqa: E402
 from generation.service import generate_and_store, mutate_and_store  # noqa: E402
+from schema_registry import (DOCUMENT_SCHEMA_VERSION, load as load_schema_route,
+                             route as schema_route)  # noqa: E402
 from store import DocStore  # noqa: E402
 from templates import apply_bindings, validate_bindings  # noqa: E402
 from validation import run_validation  # noqa: E402
 
 REPO_ROOT = WORKER_ROOT.parents[1]
-SCHEMA_PATH = str(REPO_ROOT / "schema" / "document-0.1.schema.json")
+# Compatibility import for internal diagnostics; live work always resolves a
+# complete route through schema_registry below.
+SCHEMA_PATH = str(schema_route(DOCUMENT_SCHEMA_VERSION)["schema_path"])
 
 app = FastAPI(title="ide8.flow generation worker", version="0.1.0")
 
@@ -93,13 +96,11 @@ def _gen_deps():
     store = _deps()
     if "pack" not in _state:
         import anthropic
-        pack = prompts.load_pack(os.environ.get("PROMPT_PACK", "0.1"))
-        pack["exemplar"] = json.loads(
-            (REPO_ROOT / "services" / "render" / "examples"
-             / "example.json").read_text())
+        runtime = load_schema_route(DOCUMENT_SCHEMA_VERSION)
         _state.update({
-            "pack": pack,
-            "schema_json": json.loads(Path(SCHEMA_PATH).read_text()),
+            "runtime": runtime,
+            "pack": runtime["pack"],
+            "schema_json": runtime["schema_json"],
             "profile": _default_profile(),
             # generous retries: 429s during fan-out bursts resolve within
             # the minute window; the SDK honours retry-after with backoff
@@ -140,14 +141,15 @@ def resolve_preset(name):
     return GenConfig(fast_model=fast, strong_model=strong)
 
 
-def _run_job(job_id, brief, n, config, profile):
+def _run_job(job_id, brief, n, config, profile, runtime):
     store, s = _gen_deps()
     store.set_job_status(job_id, "running")
     try:
         generate_and_store(
             brief, n=n, store=store, client=s["client"], render=s["render"],
-            pack=s["pack"], schema_json=s["schema_json"],
-            schema_path=SCHEMA_PATH, profile=profile,
+            pack=runtime["pack"], schema_json=runtime["schema_json"],
+            schema_path=runtime["schema_path"], profile=profile,
+            expected_version=runtime["version"],
             config=config, job_id=job_id)
         store.set_job_status(job_id, "done", finished=True)
     except Exception as e:  # noqa: BLE001 — job must always reach a terminal state
@@ -165,12 +167,18 @@ def generate(payload: dict = Body(...)):
     n = max(1, min(int(payload.get("n", 6)), 8))
     config = resolve_preset(payload.get("engine", "standard"))
     store, _ = _gen_deps()  # construct deps eagerly: fail in-request, not in-thread
+    try:
+        runtime = load_schema_route(payload.get(
+            "schema_version", DOCUMENT_SCHEMA_VERSION))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     profile = _resolve_profile(brief.get("brand"))
     job_id = store.create_job(brief, n)
-    threading.Thread(target=_run_job, args=(job_id, brief, n, config, profile),
+    threading.Thread(target=_run_job,
+                     args=(job_id, brief, n, config, profile, runtime),
                      daemon=True).start()
     return {"job_id": job_id, "status": "queued", "n": n,
-            "brand": profile.get("name"),
+            "brand": profile.get("name"), "schema_version": runtime["version"],
             "models": {"fast": config.fast_model,
                        "strong": config.strong_model}}
 
@@ -442,7 +450,11 @@ def download_sla(version_id: str):
     if v is None:
         raise HTTPException(404, "unknown version")
     profile = _resolve_profile(_brand_for_version(store, v))
-    sla = s["render"].compile(merge_profile(v["document"], profile))
+    asset_map = {meta["name"]: store.get_asset(meta["name"])
+                 for meta in store.list_assets()}
+    staged, _, image_meta = resolve_srcs(
+        merge_profile(v["document"], profile), asset_map)
+    sla = s["render"].compile(staged, image_meta=image_meta or None)
     return Response(
         content=sla, media_type="application/vnd.scribus.sla+xml",
         headers={"Content-Disposition":
@@ -475,8 +487,8 @@ def download_bundle(version_id: str, request: Request):
     merged = merge_profile(v["document"], profile)
     asset_map = {meta["name"]: store.get_asset(meta["name"])
                  for meta in store.list_assets()}
-    staged, files = resolve_srcs(merged, asset_map)
-    sla = s["render"].compile(staged)
+    staged, files, image_meta = resolve_srcs(merged, asset_map)
+    sla = s["render"].compile(staged, image_meta=image_meta or None)
 
     referenced = {item.get("src") for pg in v["document"].get("pages", [])
                   for item in pg.get("items", [])
@@ -524,12 +536,18 @@ def mutate(version_id: str, payload: dict = Body(...)):
     store, s = _gen_deps()
     parent = store.get_version(version_id, include_document=False)
     profile = _resolve_profile(_brand_for_version(store, parent))
+    if parent is None:
+        raise HTTPException(404, "unknown version")
+    try:
+        runtime = load_schema_route(parent["schema_version"])
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
     try:
         new_id, r = mutate_and_store(
             version_id, instruction, store=store, client=s["client"],
-            render=s["render"], pack=s["pack"],
-            schema_json=s["schema_json"], schema_path=SCHEMA_PATH,
-            profile=profile)
+            render=s["render"], pack=runtime["pack"],
+            schema_json=runtime["schema_json"], schema_path=runtime["schema_path"],
+            profile=profile, expected_version=runtime["version"])
     except KeyError:
         raise HTTPException(404, "unknown version")
     if new_id is None:
@@ -598,6 +616,11 @@ def _run_template_rows(run_id, template, rows, package):
     recorded per-row and never batch-fatal."""
     store, s = _gen_deps()
     profile = _resolve_profile(template["brand"])
+    try:
+        runtime = load_schema_route(template["schema_version"])
+    except ValueError as exc:
+        store.set_template_run(run_id, "failed", error=str(exc))
+        return
     asset_map = {meta["name"]: store.get_asset(meta["name"])
                  for meta in store.list_assets()}
     results = []
@@ -609,7 +632,7 @@ def _run_template_rows(run_id, template, rows, package):
                 asset_names=set(asset_map))
             if not errors:
                 report = run_validation(
-                    doc, profile, SCHEMA_PATH,
+                    doc, profile, runtime["schema_path"],
                     asset_names=set(asset_map))
                 errors = report["errors"] if not report["ok"] else []
             if errors:
@@ -617,8 +640,8 @@ def _run_template_rows(run_id, template, rows, package):
                                 "errors": errors})
                 continue
             merged = merge_profile(doc, profile)
-            staged, files = resolve_srcs(merged, asset_map)
-            sla = s["render"].compile(staged)
+            staged, files, image_meta = resolve_srcs(merged, asset_map)
+            sla = s["render"].compile(staged, image_meta=image_meta or None)
             png_b64, overflows = s["render"].proof_meta(sla, assets=files)
             if overflows:
                 results.append({"row": i, "status": "failed", "errors": [

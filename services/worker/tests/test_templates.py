@@ -110,7 +110,7 @@ class TestBindingLogic(unittest.TestCase):
 class FakeRender:
     """Render double: flags documents whose headline contains OVERFLOW."""
 
-    def compile(self, document):
+    def compile(self, document, image_meta=None):
         return json.dumps(document).encode()
 
     def proof_meta(self, sla_bytes, dpi=150, page=1, assets=None):

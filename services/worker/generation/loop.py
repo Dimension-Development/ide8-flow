@@ -113,7 +113,7 @@ def _tool_result(tool_use_id, content, is_error=False):
 
 def generate_concept(brief, profile, archetype, *, client, render,
                      pack, schema_json, schema_path, config=None,
-                     assets=None):
+                     assets=None, expected_version=None):
     """Run the full GEN-1 loop for one concept. Returns ConceptResult.
 
     `assets` is {name: {name, mime, width, height, data}} — advertised to
@@ -161,6 +161,16 @@ def generate_concept(brief, profile, archetype, *, client, render,
             document["version"] = str(document["version"])
         messages.append({"role": "assistant", "content": resp.content})
 
+        if expected_version is not None and document.get("version") != expected_version:
+            result.validation = {"ok": False, "errors": [{
+                "code": "document-version-mismatch", "path": "version",
+                "message": (f'emitted version {document.get("version")!r} does not '
+                            f'match active schema {expected_version!r}')}],
+                "warnings": []}
+            messages.append({"role": "user", "content": [_tool_result(
+                emit.id, json.dumps(result.validation), is_error=True)]})
+            continue
+
         # ---- deterministic gates (cheapest first, GEN-3 / VAL-1..4) -----
         report = run_validation(document, profile, schema_path,
                                 asset_names=assets.keys(), brief=brief)
@@ -175,9 +185,9 @@ def generate_concept(brief, profile, archetype, *, client, render,
             continue
 
         merged = merge_profile(document, profile)
-        staged, files = resolve_srcs(merged, assets)
+        staged, files, image_meta = resolve_srcs(merged, assets)
         try:
-            sla = render.compile(staged)
+            sla = render.compile(staged, image_meta=image_meta or None)
         except CompileRejected as e:
             validation_failures += 1
             # keep the reject as the result's last-known validation state,

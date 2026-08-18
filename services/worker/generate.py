@@ -22,13 +22,12 @@ from generation import prompts  # noqa: E402
 from generation.loop import GenConfig  # noqa: E402
 from generation.render_client import RenderClient  # noqa: E402
 from generation.service import generate_and_store  # noqa: E402
+from schema_registry import (DOCUMENT_SCHEMA_VERSION,
+                             SchemaRoutingError, load as load_schema_route)  # noqa: E402
 from store import DocStore  # noqa: E402
 
 REPO_ROOT = WORKER_ROOT.parents[1]
-DEFAULT_SCHEMA = REPO_ROOT / "schema" / "document-0.1.schema.json"
 DEFAULT_PROFILE = WORKER_ROOT / "examples" / "brand_profile.json"
-DEFAULT_EXEMPLAR = (REPO_ROOT / "services" / "render" / "examples"
-                    / "example.json")
 
 
 def main(argv=None):
@@ -38,9 +37,15 @@ def main(argv=None):
     p.add_argument("--db", default=str(WORKER_ROOT / "data" / "ide8.db"))
     p.add_argument("--outdir", default=None,
                    help="optionally dump per-concept artifact files")
-    p.add_argument("--pack", default="0.1")
+    p.add_argument("--schema-version", default=DOCUMENT_SCHEMA_VERSION,
+                   help="document schema/prompt/exemplar route (default: %(default)s)")
+    p.add_argument("--pack", default=None,
+                   help="explicit prompt-pack override for diagnostics")
     p.add_argument("--profile", default=str(DEFAULT_PROFILE))
-    p.add_argument("--schema", default=str(DEFAULT_SCHEMA))
+    p.add_argument("--schema", default=None,
+                   help="explicit schema-path override for diagnostics")
+    p.add_argument("--exemplar", default=None,
+                   help="explicit exemplar-path override for diagnostics")
     p.add_argument("--render-url", default="http://localhost:8127")
     p.add_argument("--fast-model", default=None)
     p.add_argument("--strong-model", default=None)
@@ -51,9 +56,12 @@ def main(argv=None):
 
     brief = json.loads(Path(args.brief).read_text())
     profile = load_profile(args.profile)
-    schema_json = json.loads(Path(args.schema).read_text())
-    pack = prompts.load_pack(args.pack)
-    pack["exemplar"] = json.loads(DEFAULT_EXEMPLAR.read_text())
+    try:
+        runtime = load_schema_route(
+            args.schema_version, schema_path=args.schema, prompt_pack=args.pack,
+            exemplar_path=args.exemplar)
+    except SchemaRoutingError as exc:
+        p.error(str(exc))
 
     cfg = GenConfig(max_iterations=args.max_iterations)
     if args.fast_model:
@@ -66,13 +74,15 @@ def main(argv=None):
     render = RenderClient(args.render_url)
     render.healthz()  # fail fast if the render service is down
 
-    print(f"fan-out: {args.n} concepts, pack {pack['version']}, "
+    print(f"fan-out: {args.n} concepts, schema {runtime['version']}, "
+          f"pack {runtime['pack']['version']}, "
           f"fast={cfg.fast_model}, strong={cfg.strong_model}, db={args.db}")
     summary = generate_and_store(
         brief, n=args.n, store=store,
         client=anthropic.Anthropic(max_retries=6),
-        render=render, pack=pack, schema_json=schema_json,
-        schema_path=args.schema, profile=profile, config=cfg)
+        render=render, pack=runtime["pack"], schema_json=runtime["schema_json"],
+        schema_path=runtime["schema_path"], profile=profile, config=cfg,
+        expected_version=runtime["version"])
 
     for i, c in enumerate(summary["concepts"], 1):
         status = "approved" if c["approved"] else (
