@@ -1,0 +1,18 @@
+{
+  "name": "BYOMA",
+  "version": "replace-with-approved-version",
+  "owner": "replace-with-design-owner",
+  "swatches": [],
+  "fonts": [],
+  "charStyles": [],
+  "paraStyles": [],
+  "rules": {
+    "contrastFloor": 3,
+    "minTypeSize": null,
+    "safeZonePt": 17.007874,
+    "mandatoryElements": [],
+    "logoRules": "replace-with-measurable-approved-rules",
+    "productionRules": "replace-with-approved-print-rules"
+  },
+  "designPrinciples": "Replace with approved interpretive direction: composition, typography, imagery, density and what to avoid. Keep measurable hard constraints in rules."
+}

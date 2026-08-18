@@ -52,13 +52,18 @@ def staged_relpath(name, mime):
 def resolve_srcs(document, asset_map):
     """Rewrite image `src` asset names to staged relative paths.
 
-    Returns (document_copy, files) where files maps staged relpath -> bytes.
+    Returns (document_copy, files, image_meta) where files maps staged relpath
+    -> bytes and image_meta maps the same path to its trusted source-image
+    dimensions.  Dimensions travel to the compiler separately from canonical
+    document JSON, so an author/model can choose a crop but cannot invent the
+    source geometry it is cropped from.
     Unknown names are left untouched — validation has already failed them
     (missing-asset) before this runs.
     """
     import copy
     doc = copy.deepcopy(document)
     files = {}
+    image_meta = {}
     for pg in doc.get("pages", []):
         for item in pg.get("items", []):
             if item.get("type") != "image":
@@ -69,4 +74,8 @@ def resolve_srcs(document, asset_map):
             relpath = staged_relpath(asset["name"], asset["mime"])
             item["src"] = relpath
             files[relpath] = asset["data"]
-    return doc, files
+            image_meta[relpath] = {
+                "width": asset.get("width"),
+                "height": asset.get("height"),
+            }
+    return doc, files, image_meta

@@ -95,12 +95,13 @@ class TestValidationAndStaging(unittest.TestCase):
         asset_map = {"logo-primary": {
             "name": "logo-primary", "mime": "image/png",
             "width": 120, "height": 80, "data": png}}
-        staged, files = resolve_srcs(doc_with_image(), asset_map)
+        staged, files, image_meta = resolve_srcs(doc_with_image(), asset_map)
         rel = staged_relpath("logo-primary", "image/png")
         self.assertEqual(rel, "assets/logo-primary.png")
         item = staged["pages"][0]["items"][-1]
         self.assertEqual(item["src"], rel)
         self.assertEqual(files, {rel: png})
+        self.assertEqual(image_meta, {rel: {"width": 120, "height": 80}})
         # original untouched
         self.assertEqual(
             doc_with_image()["pages"][0]["items"][-1]["src"], "logo-primary")

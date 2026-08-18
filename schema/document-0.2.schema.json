@@ -1,0 +1,299 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ide8.flow/schema/document-0.2.schema.json",
+  "title": "ide8.flow document (document-schema 0.2)",
+  "description": "Formal schema for renderer-neutral documents with gradients, item opacity, and deterministic image placement. Human-readable contract: docs/SCHEMA-0.2.md. additionalProperties is false throughout so unsupported keys fail loudly and feed the repair loop.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "page", "pages"],
+  "properties": {
+    "version": { "const": "0.2" },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "title": { "type": "string" } }
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size": {
+          "oneOf": [
+            { "enum": ["A0", "A1", "A2", "A3", "A4", "A5", "SRA3", "LETTER", "TABLOID"] },
+            {
+              "type": "array",
+              "items": { "type": "number", "exclusiveMinimum": 0 },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
+        },
+        "orientation": { "enum": ["portrait", "landscape"] },
+        "margins": {
+          "type": "array",
+          "items": { "type": "number", "minimum": 0 },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "bleed": { "type": "number", "minimum": 0 }
+      }
+    },
+    "swatches": { "type": "array", "items": { "$ref": "#/$defs/swatch" } },
+    "charStyles": { "type": "array", "items": { "$ref": "#/$defs/charStyle" } },
+    "paraStyles": { "type": "array", "items": { "$ref": "#/$defs/paraStyle" } },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/$defs/item" } }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "frame": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "point": {
+      "type": "array",
+      "items": { "type": "number", "minimum": 0, "maximum": 1 },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "stroke": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["color", "width"],
+      "properties": {
+        "color": { "type": "string", "minLength": 1 },
+        "width": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "gradientStop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "color"],
+      "properties": {
+        "at": { "type": "number", "minimum": 0, "maximum": 1 },
+        "color": { "type": "string", "minLength": 1 }
+      }
+    },
+    "gradientStops": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 16,
+      "items": { "$ref": "#/$defs/gradientStop" }
+    },
+    "linearGradient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "start", "end", "stops"],
+      "properties": {
+        "type": { "const": "linear-gradient" },
+        "start": { "$ref": "#/$defs/point" },
+        "end": { "$ref": "#/$defs/point" },
+        "stops": { "$ref": "#/$defs/gradientStops" }
+      }
+    },
+    "radialGradient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "center", "radius", "stops"],
+      "properties": {
+        "type": { "const": "radial-gradient" },
+        "center": { "$ref": "#/$defs/point" },
+        "focal": { "$ref": "#/$defs/point" },
+        "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+        "stops": { "$ref": "#/$defs/gradientStops" }
+      }
+    },
+    "fill": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        { "$ref": "#/$defs/linearGradient" },
+        { "$ref": "#/$defs/radialGradient" }
+      ]
+    },
+    "swatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "space", "values"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "space": { "enum": ["cmyk", "rgb"] },
+        "values": { "type": "array", "items": { "type": "number", "minimum": 0 } },
+        "spot": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "space": { "const": "cmyk" } } },
+          "then": {
+            "properties": {
+              "values": { "minItems": 4, "maxItems": 4, "items": { "maximum": 100 } }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "space": { "const": "rgb" } } },
+          "then": {
+            "properties": {
+              "values": { "minItems": 3, "maxItems": 3, "items": { "maximum": 255 } }
+            }
+          }
+        }
+      ]
+    },
+    "charStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "font"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "font": { "type": "string", "minLength": 1 },
+        "size": { "type": "number", "exclusiveMinimum": 0 },
+        "color": { "type": "string" },
+        "tracking": { "type": "number" }
+      }
+    },
+    "paraStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "charStyle": { "type": "string" },
+        "align": { "enum": ["left", "center", "right", "justify", "force"] },
+        "lineHeight": { "type": "number", "exclusiveMinimum": 0 },
+        "spaceBefore": { "type": "number", "minimum": 0 },
+        "spaceAfter": { "type": "number", "minimum": 0 },
+        "indent": { "type": "number", "minimum": 0 },
+        "firstIndent": { "type": "number" }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string" },
+        "charStyle": { "type": "string" }
+      }
+    },
+    "paragraph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["style"],
+      "properties": {
+        "style": { "type": "string", "minLength": 1 },
+        "text": { "type": "string" },
+        "runs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/run" } }
+      },
+      "anyOf": [{ "required": ["text"] }, { "required": ["runs"] }]
+    },
+    "item": {
+      "type": "object",
+      "required": ["type", "frame"],
+      "properties": {
+        "type": { "enum": ["text", "shape", "path", "image"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "text" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/itemText" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "shape" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/itemShape" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "path" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/itemPath" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "image" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/itemImage" }
+        }
+      ]
+    },
+    "itemText": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "frame", "paragraphs"],
+      "properties": {
+        "type": { "const": "text" },
+        "frame": { "$ref": "#/$defs/frame" },
+        "name": { "type": "string" },
+        "fill": { "$ref": "#/$defs/fill" },
+        "stroke": { "$ref": "#/$defs/stroke" },
+        "paragraphs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/paragraph" } },
+        "columns": { "type": "integer", "minimum": 1 },
+        "columnGap": { "type": "number", "minimum": 0 },
+        "padding": { "type": "number", "minimum": 0 }
+      }
+    },
+    "itemShape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "frame"],
+      "properties": {
+        "type": { "const": "shape" },
+        "frame": { "$ref": "#/$defs/frame" },
+        "name": { "type": "string" },
+        "fill": { "$ref": "#/$defs/fill" },
+        "stroke": { "$ref": "#/$defs/stroke" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+        "d": { "type": "string", "pattern": "^[Mm]" }
+      }
+    },
+    "itemPath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "frame", "d", "stroke"],
+      "properties": {
+        "type": { "const": "path" },
+        "frame": { "$ref": "#/$defs/frame" },
+        "name": { "type": "string" },
+        "d": { "type": "string", "pattern": "^[Mm]" },
+        "stroke": { "$ref": "#/$defs/stroke" }
+      }
+    },
+    "itemImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "frame", "src"],
+      "properties": {
+        "type": { "const": "image" },
+        "frame": { "$ref": "#/$defs/frame" },
+        "name": { "type": "string" },
+        "fill": { "$ref": "#/$defs/fill" },
+        "stroke": { "$ref": "#/$defs/stroke" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+        "src": { "type": "string", "minLength": 1 },
+        "fit": { "enum": ["contain", "cover", "stretch"], "default": "contain" },
+        "focus": { "$ref": "#/$defs/point", "default": [0.5, 0.5] },
+        "zoom": { "type": "number", "minimum": 1, "maximum": 8, "default": 1 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              { "required": ["focus"] },
+              { "required": ["zoom"] }
+            ]
+          },
+          "then": {
+            "required": ["fit"],
+            "properties": { "fit": { "const": "cover" } }
+          }
+        }
+      ]
+    }
+  }
+}

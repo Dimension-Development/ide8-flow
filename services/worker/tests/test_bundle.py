@@ -21,7 +21,7 @@ PNG_1PX = bytes.fromhex(
 
 
 class FakeRender:
-    def compile(self, document):
+    def compile(self, document, image_meta=None):
         # echo the staged srcs so the test can assert resolution happened
         srcs = [item.get("src") for pg in document.get("pages", [])
                 for item in pg.get("items", [])

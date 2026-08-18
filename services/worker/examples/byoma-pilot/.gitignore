@@ -1,0 +1,11 @@
+# Client-supplied and licensed material must be deliberately released elsewhere.
+brand/fonts/*
+brand/logos/*
+brand/imagery/*
+brand/manifest.json
+brand/profile.json
+brief.json
+
+!brand/fonts/.gitkeep
+!brand/logos/.gitkeep
+!brand/imagery/.gitkeep

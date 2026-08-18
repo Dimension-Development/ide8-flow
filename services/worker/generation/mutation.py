@@ -78,7 +78,7 @@ def _mutation_message(document, instruction):
 
 def mutate_document(document, instruction, profile, *, client, render,
                     pack, schema_json, schema_path, config=None,
-                    assets=None):
+                    assets=None, expected_version=None):
     cfg = config or GenConfig(max_iterations=3)
     meter = Meter()
     result = MutationResult()
@@ -111,6 +111,16 @@ def mutate_document(document, instruction, profile, *, client, render,
             revised["version"] = str(revised["version"])
         messages.append({"role": "assistant", "content": resp.content})
 
+        if expected_version is not None and revised.get("version") != expected_version:
+            result.validation = {"ok": False, "errors": [{
+                "code": "document-version-mismatch", "path": "version",
+                "message": (f'emitted version {revised.get("version")!r} does not '
+                            f'match parent schema {expected_version!r}')}],
+                "warnings": []}
+            messages.append({"role": "user", "content": [_tool_result(
+                emit.id, json.dumps(result.validation), is_error=True)]})
+            continue
+
         report = run_validation(revised, profile, schema_path,
                                 asset_names=assets.keys())
         result.validation = report
@@ -121,9 +131,10 @@ def mutate_document(document, instruction, profile, *, client, render,
                 emit.id, json.dumps(report), is_error=True)]})
             continue
 
-        staged, files = resolve_srcs(merge_profile(revised, profile), assets)
+        staged, files, image_meta = resolve_srcs(
+            merge_profile(revised, profile), assets)
         try:
-            sla = render.compile(staged)
+            sla = render.compile(staged, image_meta=image_meta or None)
         except CompileRejected as e:
             messages.append({"role": "user", "content": [_tool_result(
                 emit.id, json.dumps({"ok": False, "errors": e.errors}),

@@ -1,0 +1,70 @@
+{
+  "version": "0.2",
+  "meta": {"title": "Synthetic agency-card conformance fixture — not BYOMA artwork"},
+  "page": {
+    "size": [425.19685, 425.19685],
+    "orientation": "portrait",
+    "margins": [17.007874, 17.007874, 17.007874, 17.007874],
+    "bleed": 8.503937
+  },
+  "swatches": [
+    {"name": "SyntheticCoral", "space": "cmyk", "values": [0, 82, 40, 0]},
+    {"name": "SyntheticLime", "space": "cmyk", "values": [24, 0, 74, 0]},
+    {"name": "SyntheticInk", "space": "cmyk", "values": [75, 56, 35, 72]},
+    {"name": "SyntheticPaper", "space": "cmyk", "values": [0, 0, 0, 0]},
+    {"name": "CutContour", "space": "cmyk", "values": [0, 100, 0, 0], "spot": true}
+  ],
+  "charStyles": [
+    {"name": "CardHeadlineChar", "font": "Liberation Sans Bold", "size": 25, "color": "SyntheticInk"},
+    {"name": "CardBodyChar", "font": "Liberation Sans Regular", "size": 10, "color": "SyntheticInk"},
+    {"name": "CardLogoChar", "font": "Liberation Sans Bold", "size": 9, "color": "SyntheticInk"}
+  ],
+  "paraStyles": [
+    {"name": "CardHeadline", "charStyle": "CardHeadlineChar", "align": "left", "lineHeight": 27},
+    {"name": "CardBody", "charStyle": "CardBodyChar", "align": "left", "lineHeight": 13},
+    {"name": "CardLogo", "charStyle": "CardLogoChar", "align": "right", "lineHeight": 11}
+  ],
+  "pages": [{"items": [
+    {
+      "type": "shape", "name": "gradient-background",
+      "frame": [-8.503937, -8.503937, 442.204724, 442.204724],
+      "fill": {"type": "linear-gradient", "start": [0, 0.25], "end": [1, 0.75],
+               "stops": [{"at": 0, "color": "SyntheticCoral"}, {"at": 1, "color": "SyntheticLime"}]}
+    },
+    {
+      "type": "image", "name": "synthetic-model-cutout",
+      "frame": [0, 0, 212.598425, 425.19685], "src": "assets/synthetic-model-cutout.png",
+      "fit": "cover", "focus": [0.43, 0.34], "zoom": 1.1
+    },
+    {
+      "type": "shape", "name": "rounded-star-top",
+      "frame": [176, 24, 57, 57], "fill": "SyntheticPaper", "opacity": 0.5,
+      "d": "M28.5 0 C32 11 37 19 47 10 C38 21 46 25 57 28.5 C46 32 38 37 47 47 C37 38 32 46 28.5 57 C25 46 20 38 10 47 C19 37 11 32 0 28.5 C11 25 19 21 10 10 C20 19 25 11 28.5 0 Z"
+    },
+    {
+      "type": "shape", "name": "rounded-star-bottom",
+      "frame": [187, 334, 42, 42], "fill": "SyntheticInk", "opacity": 0.5,
+      "d": "M21 0 C24 8 27 14 35 7 C28 15 34 18 42 21 C34 24 28 27 35 35 C27 28 24 34 21 42 C18 34 15 28 7 35 C14 27 8 24 0 21 C8 18 14 15 7 7 C15 14 18 8 21 0 Z"
+    },
+    {
+      "type": "text", "name": "logo-clear-space-placeholder",
+      "frame": [292, 28, 103, 30], "paragraphs": [{"style": "CardLogo", "text": "LOGO CLEAR SPACE"}]
+    },
+    {
+      "type": "text", "name": "headline",
+      "frame": [232, 102, 164, 95],
+      "paragraphs": [{"style": "CardHeadline", "text": "SYNTHETIC\nAGENCY CARD"}]
+    },
+    {
+      "type": "text", "name": "body-copy",
+      "frame": [232, 216, 157, 115],
+      "paragraphs": [{"style": "CardBody", "text": "A neutral fixture demonstrating deterministic image crop, hierarchy, gradients, opacity and vector motifs. It contains no client copy, imagery or brand rules."}]
+    },
+    {
+      "type": "path", "name": "cut-contour-test",
+      "frame": [0, 0, 425.19685, 425.19685],
+      "d": "M0 0 L425.19685 0 L425.19685 425.19685 L0 425.19685",
+      "stroke": {"color": "CutContour", "width": 0.5}
+    }
+  ]}]
+}

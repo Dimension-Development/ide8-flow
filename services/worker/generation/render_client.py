@@ -28,9 +28,11 @@ class RenderClient:
     def healthz(self):
         return self._http.get("/healthz").json()
 
-    def compile(self, document):
+    def compile(self, document, image_meta=None):
         """document JSON -> SLA bytes. Raises CompileRejected on 422."""
-        resp = self._http.post("/compile", json=document)
+        payload = (document if not image_meta else
+                   {"document": document, "image_meta": image_meta})
+        resp = self._http.post("/compile", json=payload)
         if resp.status_code == 422:
             raise CompileRejected(resp.json().get("errors", []))
         resp.raise_for_status()

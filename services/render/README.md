@@ -12,8 +12,10 @@ document.json ──▶ sla_compiler.py ──▶ doc.sla ──▶ scribus -g -
 ```
 
 **The document format is specified in [`docs/SCHEMA.md`](../../docs/SCHEMA.md)**
-(normative, reference v0.1). This README covers the compiler, the FastAPI
-service, the Docker image, and implementation notes.
+(immutable reference v0.1) and
+[`docs/SCHEMA-0.2.md`](../../docs/SCHEMA-0.2.md) (gradients, shape/image
+opacity and versioned image-placement semantics). This README covers the
+compiler, the FastAPI service, the Docker image, and implementation notes.
 
 ## Why this shape
 
@@ -39,7 +41,12 @@ fixing a contrast bug purely from looking at the rendered proof.
   (path-traversal guarded) so relative `PFILE` paths resolve.
 - `service/scribus_scripts/` — scripts that run *inside* headless Scribus:
   `export_pdf.py` (SLA → PDF, proof/package modes), `gen_donor.py`.
-- `examples/example.json` — a 2-page POS header card exercising every feature.
+- `examples/example.json` — a 2-page POS header card exercising every `0.1`
+  feature.
+- `examples/example-0.2.json` — the synthetic agency-card vocabulary example;
+  its gradient/opacity features compile now, while contain/cover image
+  placement remains an explicit T04 capability error until asset metadata is
+  wired into `/compile`.
 - `tests/` — unittest suite (golden byte-compare, determinism, error codes)
   plus `check_separation.py`, the RND-3 acceptance check.
 - `tests/golden/out.sla` — golden fixture; byte-identical recompile is a CI
@@ -93,6 +100,12 @@ python3 tests/check_separation.py out.pdf CutContour             # RND-3 accepta
    `ITEM_ID_BASE` — identical input compiles to byte-identical output.
 
 ## Render-pipeline limits (current state)
+
+- **Document `0.2` gradients/opacity — implemented.** Linear/radial gradients
+  emit Scribus' round-trip-stable types 6/7 and item opacity maps directly to
+  `TransValue`/`TransValueS`. `0.2` stretch images are supported; deterministic
+  contain/cover/focal placement remains T04 and currently fails as
+  `unsupported-feature` rather than rendering approximately.
 
 - **Spot → PDF separation — RESOLVED (RND-3).** Root cause was never CMS
   prefs: `PDFfile.outdst` defaults to 0 (screen output), which converts all

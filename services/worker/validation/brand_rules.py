@@ -45,4 +45,22 @@ def check(document, profile):
                 f'mandatory element "{name}" is missing — every concept must '
                 f"include it as a named item")
 
+    known_colours = set(prof_swatches) | {"Black", "White", "None"}
+    for p, page in enumerate(document.get("pages", [])):
+        for i, item in enumerate(page.get("items", [])):
+            fill = item.get("fill")
+            if isinstance(fill, str):
+                candidates = [(f"pages[{p}].items[{i}].fill", fill)]
+            elif isinstance(fill, dict):
+                candidates = [
+                    (f"pages[{p}].items[{i}].fill.stops[{s}].color",
+                     stop.get("color"))
+                    for s, stop in enumerate(fill.get("stops", []))]
+            else:
+                candidates = []
+            for path, colour in candidates:
+                if colour not in known_colours:
+                    err("unknown-swatch", path,
+                        f'"{colour}" is not in the brand profile')
+
     return errors

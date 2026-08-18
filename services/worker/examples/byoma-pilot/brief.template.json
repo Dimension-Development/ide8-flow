@@ -1,0 +1,27 @@
+{
+  "title": "BYOMA 150mm information card",
+  "brand": "BYOMA",
+  "format": {
+    "trimMm": [150, 150],
+    "trimPt": [425.19685, 425.19685],
+    "bleedMm": 3,
+    "bleedPt": 8.503937,
+    "safeAreaMm": 6,
+    "safeAreaPt": 17.007874
+  },
+  "copy": {
+    "headline": "REPLACE WITH APPROVED HEADLINE",
+    "subhead": "REPLACE WITH APPROVED SUBHEAD",
+    "body": "REPLACE WITH APPROVED BODY COPY",
+    "legal": "REPLACE WITH APPROVED LEGAL COPY"
+  },
+  "imageAssets": [],
+  "mandatoryElements": [],
+  "creativeDirection": {
+    "imageShareOfWidth": 0.5,
+    "copyPosition": "right",
+    "background": "replace-with-approved-direction",
+    "motifs": "replace-with-approved-direction"
+  },
+  "approver": "replace-with-design-approver"
+}

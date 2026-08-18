@@ -40,6 +40,27 @@ WHITE = (255.0, 255.0, 255.0)
 BLACK = (0.0, 0.0, 0.0)
 
 
+def _fill_colours(fill, swatches, path, errors):
+    """Resolve a solid fill or every gradient stop without a white fallback."""
+    names = ([fill] if isinstance(fill, str) else
+             [stop.get("color") for stop in fill.get("stops", [])]
+             if isinstance(fill, dict) else [])
+    colours = []
+    for i, name in enumerate(names):
+        if name not in swatches:
+            suffix = f".stops[{i}].color" if isinstance(fill, dict) else ""
+            errors.append({"code": "unknown-swatch", "path": path + suffix,
+                           "message": f'"{name}" is not a defined swatch'})
+        else:
+            colours.append(swatches[name])
+    return colours
+
+
+def _composite(foreground, opacity, background=WHITE):
+    return tuple(opacity * fg + (1 - opacity) * bg
+                 for fg, bg in zip(foreground, background))
+
+
 def check(document, profile):
     errors = []
     floor = profile.get("rules", {}).get("contrastFloor", DEFAULT_FLOOR)
@@ -51,9 +72,14 @@ def check(document, profile):
     char_styles = {st["name"]: st for st in document.get("charStyles", [])}
     para_styles = {st["name"]: st for st in document.get("paraStyles", [])}
 
-    def text_rgb(char_style_name):
+    def text_rgb(char_style_name, path):
         st = char_styles.get(char_style_name, {})
-        return swatches.get(st.get("color", "Black"), BLACK)
+        name = st.get("color", "Black")
+        if name not in swatches:
+            errors.append({"code": "unknown-swatch", "path": path,
+                           "message": f'"{name}" is not a defined swatch'})
+            return None
+        return swatches[name]
 
     for n, pg in enumerate(document.get("pages", [])):
         items = pg.get("items", [])
@@ -64,17 +90,26 @@ def check(document, profile):
             x, y, fw, fh = item["frame"]
             cx, cy = x + fw / 2, y + fh / 2
 
-            bg = WHITE
-            if item.get("fill"):
-                bg = swatches.get(item["fill"], WHITE)
+            bg_colours = [WHITE]
+            bg_opacity = 1
+            if "fill" in item:
+                bg_colours = _fill_colours(item["fill"], swatches,
+                                           f"{p}.fill", errors)
             else:
-                for prev in items[:j]:
-                    fill = prev.get("fill")
-                    if not fill:
+                for prev_i, prev in enumerate(items[:j]):
+                    if "fill" not in prev:
                         continue
                     px, py, pw, ph = prev["frame"]
                     if px <= cx <= px + pw and py <= cy <= py + ph:
-                        bg = swatches.get(fill, WHITE)  # later = topmost
+                        bg_colours = _fill_colours(
+                            prev["fill"], swatches,
+                            f"pages[{n}].items[{prev_i}].fill", errors)
+                        bg_opacity = prev.get("opacity", 1)  # later = topmost
+
+            if bg_opacity < 1:
+                # Conservative 0.2 rule: composite semi-transparent shapes
+                # over paper white; general backdrop compositing is deferred.
+                bg_colours = [_composite(rgb, bg_opacity) for rgb in bg_colours]
 
             for k, para in enumerate(item.get("paragraphs", [])):
                 checks = []
@@ -87,8 +122,10 @@ def check(document, profile):
                                    run.get("charStyle",
                                            style.get("charStyle", ""))))
                 for path, cs_name in checks:
-                    fg = text_rgb(cs_name)
-                    ratio = _ratio(fg, bg)
+                    fg = text_rgb(cs_name, path)
+                    if fg is None:
+                        continue
+                    ratio = min((_ratio(fg, bg) for bg in bg_colours), default=0)
                     if ratio < floor:
                         errors.append({
                             "code": "low-contrast", "path": path,
