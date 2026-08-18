@@ -8,9 +8,19 @@ from pathlib import Path
 RENDER_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RENDER_ROOT))
 
-from service.app import compile_document  # noqa: E402
+try:
+    from service.app import compile_document  # noqa: E402
+except ModuleNotFoundError as exc:
+    # The lightweight compiler CI job intentionally has no service
+    # dependencies. The same test runs inside the pinned render image, where
+    # FastAPI is installed and exercises the real endpoint boundary.
+    if exc.name != "fastapi":
+        raise
+    compile_document = None
 
 
+@unittest.skipIf(compile_document is None,
+                 "FastAPI is only installed in the render-image test job")
 class TestCompileEnvelope(unittest.TestCase):
 
     def test_envelope_forwards_dimensions_to_compiler(self):
