@@ -54,7 +54,10 @@ export default function ConceptGrid({
     );
   if (!concepts) return <p className="text-ink-soft">Loading proof grid…</p>;
 
-  const briefTitle = concepts[0]?.brief?.title ?? "Untitled brief";
+  const briefTitles = new Set(concepts.map((c) => c.brief?.title ?? "Untitled brief"));
+  const briefTitle = briefTitles.size > 1
+    ? "Artwork across briefs"
+    : concepts[0]?.brief?.title ?? "Untitled brief";
 
   return (
     <div>
@@ -155,7 +158,11 @@ function ConceptCard({
         c.discarded ? "opacity-50" : ""
       }`}
     >
-      <button onClick={onOpen} className="block w-full">
+      <button
+        onClick={onOpen}
+        aria-label={`Open ${c.brief?.title ?? "Untitled brief"} — ${archetypeName}`}
+        className="block w-full"
+      >
         <div className="flex aspect-[3/4] items-center justify-center bg-ink/5 p-3">
           {c.latest?.has_proof ? (
             <img
@@ -170,6 +177,7 @@ function ConceptCard({
         </div>
       </button>
       <div className="space-y-2 p-4">
+        <p className="text-sm text-ink-soft">{c.brief?.title ?? "Untitled brief"}</p>
         <div className="flex items-center justify-between gap-2">
           <h3 className="truncate font-semibold">{archetypeName}</h3>
           <Cost usd={c.latest?.cost_usd ?? c.failure?.cost_usd} />

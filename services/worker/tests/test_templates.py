@@ -142,7 +142,7 @@ class TestTemplateEndpoints(unittest.TestCase):
         cid = self.store.create_concept({"brand": None}, "")
         self.vid = self.store.add_version(
             cid, DOC, schema_version="0.1", prompt_pack="0.1",
-            validation={"ok": True})
+            validation={"ok": True}, effective_profile=appmod._default_profile())
 
     def _promote(self, name="price-card"):
         r = self.client.post(f"/versions/{self.vid}/promote",

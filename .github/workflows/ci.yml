@@ -38,6 +38,16 @@ jobs:
           npx tsc --noEmit
           npm run build
 
+  worker-image:
+    name: worker image schema routes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build worker image
+        run: docker build -t ide8-worker -f services/worker/Dockerfile .
+      - name: Load each packaged schema, prompt pack and exemplar
+        run: docker run --rm --network none ide8-worker python -c 'from schema_registry import load; [load(v) for v in ("0.1", "0.2")]'
+
   render-image:
     name: render service image + in-container smoke
     runs-on: ubuntu-latest
@@ -57,5 +67,5 @@ jobs:
             python3 tests/check_separation.py /tmp/out.pdf CutContour
             grep -aq "/GTS_PDFXVersion (PDF/X-4" /tmp/out.pdf && echo "PDF/X-4 marker ok"
             grep -aq "/OutputIntent" /tmp/out.pdf && echo "output intent ok"
-            python3 -c "import json; r = json.load(open(\"/tmp/out.pdf.report.json\")); assert r.get(\"overflows\") == [], r; print(\"overflow report clean\")"
+            python3 -c "import json; r = json.load(open(\"/tmp/out.pdf.report.json\")); assert not r.get(\"error\") and r.get(\"overflows\") == [], r; print(\"overflow report clean\")"
           '

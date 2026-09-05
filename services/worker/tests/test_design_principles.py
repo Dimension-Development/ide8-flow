@@ -19,7 +19,7 @@ from test_generation_loop import (  # noqa: E402
     FakeRender, ScriptedClient, critique_resp, emit_resp, valid_doc)
 
 PRINCIPLES = "# X — design principles\n\nAsymmetry over centring."
-PACK = {"system_text": "You are a designer."}
+PACK = {"version": "0.1", "system_text": "You are a designer."}
 SCHEMA = {"type": "object"}
 
 

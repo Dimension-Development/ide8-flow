@@ -38,7 +38,7 @@ export default function Dashboard() {
         <StatCard label="Versions" value={stats.versions} />
         <StatCard label="LLM spend" value={`$${stats.cost_usd_total.toFixed(2)}`} />
         <StatCard
-          label="Approved"
+          label="AI check passed"
           value={stats.approved_versions}
           sub={`of ${stats.versions} versions`}
         />

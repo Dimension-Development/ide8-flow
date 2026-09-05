@@ -47,6 +47,7 @@ class TestBriefChecks(unittest.TestCase):
             image_item("meridian-logo"),
             image_item("harvest-recipe-qr"),
         ]}]}
+        self.doc["page"] = dict(self.brief["format"])
 
     def errs(self, doc):
         e, _ = brief_checks.check(doc, self.brief)

@@ -4,13 +4,16 @@
 #   docker build -t ide8-worker -f services/worker/Dockerfile .
 FROM python:3.12-slim
 
+RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY services/worker/requirements.txt services/worker/requirements.txt
 RUN pip install --no-cache-dir -r services/worker/requirements.txt
 
 COPY schema/ schema/
-COPY services/render/examples/example.json services/render/examples/example.json
+COPY services/render/examples/ services/render/examples/
 COPY services/worker/ services/worker/
 
 # SQLite store on a volume until the Supabase migration (PRD §9)

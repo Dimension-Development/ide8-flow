@@ -6,6 +6,7 @@ with repair feedback; NO vision self-critique — the designer judges the
 before/after proof pair, that's the point of a mutation.
 """
 
+import copy
 import json
 import sys
 from dataclasses import dataclass, field
@@ -18,9 +19,10 @@ if str(WORKER_ROOT) not in sys.path:
 from assets import resolve_srcs  # noqa: E402
 from brand import merge_profile  # noqa: E402
 from validation import run_validation  # noqa: E402
+from validation import mutation_checks  # noqa: E402
 from generation import prompts  # noqa: E402
 from generation.loop import (  # noqa: E402
-    GenConfig, _emit_tool, _tool_result, _tool_use)
+    GenConfig, _emission_report, _emit_tool, _tool_result, _tool_use)
 from generation.metering import Meter  # noqa: E402
 from generation.render_client import CompileRejected  # noqa: E402
 
@@ -78,19 +80,30 @@ def _mutation_message(document, instruction):
 
 def mutate_document(document, instruction, profile, *, client, render,
                     pack, schema_json, schema_path, config=None,
-                    assets=None, expected_version=None):
+                    assets=None, expected_version=None, brief=None, text_changes=None):
     cfg = config or GenConfig(max_iterations=3)
     meter = Meter()
     result = MutationResult()
     assets = assets or {}
+    change_errors = mutation_checks.validate_text_changes(document, text_changes)
+    if change_errors:
+        result.error = "invalid explicit copy replacement"
+        result.validation = {"ok": False, "errors": change_errors, "warnings": []}
+        return result
 
     system = prompts.build_system(pack, schema_json, profile,
                                   exemplar=pack.get("exemplar", {}))
     tools = [_emit_tool(schema_json)]
     messages = [{"role": "user",
                  "content": _mutation_message(document, instruction)
-                 + prompts.assets_section(list(assets.values()))}]
+                 + prompts.assets_section(list(assets.values()), version=pack["version"],
+                                          asset_notes=profile.get("assetNotes"))
+                 + prompts.geometry_section(document.get("page"))
+                 + "\n\nPreserve all existing text, page geometry and spot production paths. "
+                   "Only these named text items may change, to exactly the supplied text:\n"
+                 + json.dumps(text_changes or {}, sort_keys=True)}]
     model = cfg.fast_model
+    attempts = []
 
     for iteration in range(1, cfg.max_iterations + 1):
         result.iterations = iteration
@@ -102,7 +115,9 @@ def mutate_document(document, instruction, profile, *, client, render,
 
         emit = _tool_use(resp, "emit_document")
         if emit is None:
-            result.error = "model did not call emit_document"
+            result.error = ("model output reached its token limit before completing emit_document"
+                            if getattr(resp, "stop_reason", None) == "max_tokens" else
+                            "model did not call emit_document")
             break
         revised = emit.input
         if isinstance(revised, dict) and isinstance(
@@ -111,19 +126,18 @@ def mutate_document(document, instruction, profile, *, client, render,
             revised["version"] = str(revised["version"])
         messages.append({"role": "assistant", "content": resp.content})
 
-        if expected_version is not None and revised.get("version") != expected_version:
-            result.validation = {"ok": False, "errors": [{
-                "code": "document-version-mismatch", "path": "version",
-                "message": (f'emitted version {revised.get("version")!r} does not '
-                            f'match parent schema {expected_version!r}')}],
-                "warnings": []}
-            messages.append({"role": "user", "content": [_tool_result(
-                emit.id, json.dumps(result.validation), is_error=True)]})
-            continue
-
-        report = run_validation(revised, profile, schema_path,
-                                asset_names=assets.keys())
+        report = (_emission_report(revised, expected_version, getattr(resp, "stop_reason", None))
+                  or run_validation(revised, profile, schema_path,
+                                    asset_names=assets.keys()))
+        if report["ok"]:
+            errors = mutation_checks.check(document, revised, profile,
+                                           brief=brief, text_changes=text_changes)
+            report = {**report, "ok": not errors, "errors": errors}
         result.validation = report
+        attempt = {"iteration": iteration, "validation": report,
+                   "emitted_document": copy.deepcopy(emit.input),
+                   "stop_reason": getattr(resp, "stop_reason", None), "model": model}
+        attempts.append(attempt)
         if not report["ok"]:
             if model != cfg.strong_model:
                 model = cfg.strong_model  # mutations escalate immediately
@@ -136,6 +150,9 @@ def mutate_document(document, instruction, profile, *, client, render,
         try:
             sla = render.compile(staged, image_meta=image_meta or None)
         except CompileRejected as e:
+            result.validation = {"ok": False, "errors": e.errors, "warnings": []}
+            attempt["validation"] = result.validation
+            model = cfg.strong_model
             messages.append({"role": "user", "content": [_tool_result(
                 emit.id, json.dumps({"ok": False, "errors": e.errors}),
                 is_error=True)]})
@@ -144,6 +161,11 @@ def mutate_document(document, instruction, profile, *, client, render,
         png_b64, overflows = render.proof_meta(sla, dpi=cfg.proof_dpi,
                                                assets=files)
         if overflows:
+            result.validation = {"ok": False, "errors": [
+                {"code": "overflow", "path": o.get("item", "?"),
+                 "message": "text frame overflows"} for o in overflows], "warnings": []}
+            attempt["validation"] = result.validation
+            model = cfg.strong_model
             messages.append({"role": "user", "content": [_tool_result(
                 emit.id, json.dumps({"ok": False, "errors": [
                     {"code": "overflow", "path": o.get("item", "?"),
@@ -157,6 +179,8 @@ def mutate_document(document, instruction, profile, *, client, render,
         result.diff = doc_diff(document, revised)
         break
 
+    result.validation = {**(result.validation or {"ok": False, "errors": [], "warnings": []}),
+                         "attempts": attempts}
     result.usage = meter.report()
     if result.document is None and result.error is None:
         result.error = "mutation failed validation within iteration cap"
