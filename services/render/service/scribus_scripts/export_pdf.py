@@ -62,8 +62,8 @@ try:
                 if (scribus.getObjectType(name) == "TextFrame"
                         and scribus.textOverflows(name)):
                     report["overflows"].append({"page": pg, "item": name})
-            except Exception:
-                pass
+            except Exception as e:
+                report["error"] = str(e)
 except Exception as e:
     report["error"] = str(e)
 with open(outfile + ".report.json", "w") as fh:

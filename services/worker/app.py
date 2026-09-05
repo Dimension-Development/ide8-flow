@@ -26,16 +26,20 @@ sys.path.insert(0, str(WORKER_ROOT))
 import base64  # noqa: E402
 
 from assets import SAFE_NAME, resolve_srcs, sniff  # noqa: E402
-from brand import load_profile, merge_profile  # noqa: E402
+from brand import (apply_overrides, load_profile, merge_profile,
+                   validate_overrides)  # noqa: E402
 from generation.loop import GenConfig  # noqa: E402
 from generation.metering import assert_all_priced  # noqa: E402
 from generation.render_client import RenderClient  # noqa: E402
 from generation.service import generate_and_store, mutate_and_store  # noqa: E402
 from schema_registry import (DOCUMENT_SCHEMA_VERSION, load as load_schema_route,
                              route as schema_route)  # noqa: E402
-from store import DocStore  # noqa: E402
+from store import DocStore, content_hash  # noqa: E402
+from provenance import MissingProfileSnapshot, profile_for_version  # noqa: E402
+from validation.format_check import normalize_format  # noqa: E402
 from templates import apply_bindings, validate_bindings  # noqa: E402
 from validation import run_validation  # noqa: E402
+from workspace import WorkspaceConflict  # noqa: E402
 
 REPO_ROOT = WORKER_ROOT.parents[1]
 # Compatibility import for internal diagnostics; live work always resolves a
@@ -72,8 +76,7 @@ def _resolve_profile(brand_name):
     """BRAND-3: resolve the brand profile a brief should compile against.
 
     Prefers a profile stored under brief.brand; falls back to the env default.
-    (Pinning the exact profile version a stored doc_version used is BRAND-4 —
-    today mutate/.sla recompile against whatever the brand currently is.)
+    This resolver is for new work. Existing versions use their saved snapshot.
     """
     if brand_name:
         rec = _deps().get_brand_profile(brand_name)
@@ -82,14 +85,43 @@ def _resolve_profile(brand_name):
     return _default_profile()
 
 
-def _brand_for_version(store, version):
-    """The brand name recorded on a version's concept brief, if any. Used so
-    mutate/.sla recompile against the same profile the concept was briefed
-    with (best-effort; see BRAND-4)."""
-    if not version:
-        return None
-    concept = store.get_concept(version["concept_id"])
-    return ((concept or {}).get("brief") or {}).get("brand")
+def _effective_profile(project):
+    """BRAND-6: pinned brand version + project overrides — the profile all
+    project work validates and compiles against. Falls back to the env
+    default when the project pins no brand."""
+    store = _deps()
+    base = None
+    if project.get("brand_version_id"):
+        rec = store.get_brand_version(project["brand_version_id"])
+        base = rec["profile"] if rec else None
+    if base is None:
+        base = _default_profile()
+    return apply_overrides(base, project.get("overrides"))
+
+
+def _profile_for_version(store, version):
+    try:
+        return profile_for_version(store, version)
+    except MissingProfileSnapshot as exc:
+        raise HTTPException(409, detail={"code": "missing-profile-snapshot", "message": str(exc)})
+
+
+def _check_brief(brief):
+    if not isinstance(brief, dict) or not brief:
+        raise HTTPException(400, "payload needs a non-empty 'brief' object")
+    if "format" in brief:
+        try:
+            normalize_format(brief["format"])
+        except ValueError as exc:
+            raise HTTPException(422, detail={"code": "invalid-brief-format", "message": str(exc)})
+
+
+def _render_deps():
+    """Historical exports need the renderer, never a model credential."""
+    store = _deps()
+    if "render" not in _state:
+        _state["render"] = RenderClient(os.environ.get("RENDER_URL", "http://localhost:8127"))
+    return store, _state
 
 
 def _gen_deps():
@@ -141,7 +173,7 @@ def resolve_preset(name):
     return GenConfig(fast_model=fast, strong_model=strong)
 
 
-def _run_job(job_id, brief, n, config, profile, runtime):
+def _run_job(job_id, brief, n, config, profile, runtime, project_id=None):
     store, s = _gen_deps()
     store.set_job_status(job_id, "running")
     try:
@@ -150,7 +182,7 @@ def _run_job(job_id, brief, n, config, profile, runtime):
             pack=runtime["pack"], schema_json=runtime["schema_json"],
             schema_path=runtime["schema_path"], profile=profile,
             expected_version=runtime["version"],
-            config=config, job_id=job_id)
+            config=config, job_id=job_id, project_id=project_id)
         store.set_job_status(job_id, "done", finished=True)
     except Exception as e:  # noqa: BLE001 — job must always reach a terminal state
         store.set_job_status(job_id, "failed", error=str(e)[:2000],
@@ -162,17 +194,18 @@ def generate(payload: dict = Body(...)):
     """Async (BRF-1 UX): returns a job id immediately; concepts and versions
     land in the store incrementally, so the grid fills as they finish."""
     brief = payload.get("brief")
-    if not brief:
-        raise HTTPException(400, "payload needs a 'brief' object")
+    _check_brief(brief)
     n = max(1, min(int(payload.get("n", 6)), 8))
     config = resolve_preset(payload.get("engine", "standard"))
-    store, _ = _gen_deps()  # construct deps eagerly: fail in-request, not in-thread
+    store = _deps()
+    profile = _resolve_profile(brief.get('brand'))
+    _check_brand_asset_selection(store, profile.get('name'), brief)
+    _gen_deps()  # construct deps eagerly after checking brand asset boundaries
     try:
         runtime = load_schema_route(payload.get(
             "schema_version", DOCUMENT_SCHEMA_VERSION))
     except ValueError as exc:
         raise HTTPException(400, str(exc))
-    profile = _resolve_profile(brief.get("brand"))
     job_id = store.create_job(brief, n)
     threading.Thread(target=_run_job,
                      args=(job_id, brief, n, config, profile, runtime),
@@ -269,8 +302,9 @@ def brands_list():
 
 @app.post("/brands")
 def brand_save(payload: dict = Body(...)):
-    """Create or update a brand profile. Accepts either {name, profile} or a
-    bare profile object. Mutable (BRAND-4 pinning is future work)."""
+    """Create a brand or append its next immutable version (BRAND-4).
+    Accepts either {name, profile} or a bare profile object; a
+    content-identical save returns the current head unchanged."""
     profile = payload.get("profile") if isinstance(
         payload.get("profile"), dict) else payload
     name = (payload.get("name") or profile.get("name") or "").strip()
@@ -283,18 +317,287 @@ def brand_save(payload: dict = Body(...)):
 
 
 @app.get("/brands/{name}")
-def brand_get(name: str):
-    rec = _deps().get_brand_profile(name)
+def brand_get(name: str, version: Optional[int] = None):
+    rec = _deps().get_brand_profile(name, version=version)
     if rec is None:
-        raise HTTPException(404, "unknown brand profile")
+        raise HTTPException(404, "unknown brand profile"
+                            + (f" version {version}" if version else ""))
     return rec
+
+
+@app.get("/brands/{name}/versions")
+def brand_versions(name: str):
+    versions = _deps().list_brand_versions(name)
+    if not versions:
+        raise HTTPException(404, "unknown brand profile")
+    return {"name": name, "versions": versions}
 
 
 @app.delete("/brands/{name}")
 def brand_delete(name: str):
-    if not _deps().delete_brand_profile(name):
+    try:
+        deleted = _deps().delete_brand_profile(name)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    if not deleted:
         raise HTTPException(404, "unknown brand profile")
     return {"ok": True}
+
+
+# ------------------------------------------------------------- projects
+# The campaign layer: a project rides on a pinned, immutable brand version
+# (brand is king) and carries the directional state — brief, status, and the
+# BRAND-6 override set (the only sanctioned way a campaign breaks out of the
+# brand). Projects are mutable; per-generation brand provenance snapshots to
+# the job at launch.
+
+
+def _workspace_action(action):
+    try:
+        return action()
+    except WorkspaceConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get('/campaigns')
+def campaigns_list(include_archived: bool = False):
+    return {'campaigns': _deps().list_campaigns(include_archived)}
+
+
+@app.post('/campaigns')
+def campaign_create(payload: dict = Body(...)):
+    return _workspace_action(lambda: _deps().create_campaign(**payload))
+
+
+@app.get('/campaigns/{campaign_id}')
+def campaign_get(campaign_id: str):
+    record = _deps().get_campaign(campaign_id)
+    if record is None:
+        raise HTTPException(404, 'unknown campaign')
+    return record
+
+
+@app.patch('/campaigns/{campaign_id}')
+def campaign_update(campaign_id: str, payload: dict = Body(...)):
+    record = _workspace_action(lambda: _deps().update_campaign(campaign_id, **payload))
+    if record is None:
+        raise HTTPException(404, 'unknown campaign')
+    return record
+
+
+@app.get('/brands/{name}/assets')
+def brand_assets_get(name: str):
+    _pin_brand(_deps(), name)
+    return _deps().get_brand_assets(name)
+
+
+@app.put('/brands/{name}/assets')
+def brand_assets_put(name: str, payload: dict = Body(...)):
+    _pin_brand(_deps(), name)
+    return _workspace_action(lambda: _deps().set_brand_assets(name, payload.get('names')))
+
+
+@app.get('/brands/{name}/identity-draft')
+def identity_draft_get(name: str):
+    record = _deps().get_identity_draft(name)
+    if record is None:
+        raise HTTPException(404, 'unknown brand')
+    return record
+
+
+@app.put('/brands/{name}/identity-draft')
+def identity_draft_save(name: str, payload: dict = Body(...)):
+    _pin_brand(_deps(), name)
+    return _workspace_action(lambda: _deps().save_identity_draft(
+        name, payload.get('profile'), expected_revision=payload.get('expected_revision'),
+        base_version_id=payload.get('base_version_id')))
+
+
+@app.post('/brands/{name}/identity-draft/publish')
+def identity_draft_publish(name: str, payload: dict = Body(...)):
+    _pin_brand(_deps(), name)
+    return _workspace_action(lambda: _deps().publish_identity_draft(name, revision=payload.get('revision')))
+
+
+def _check_brand_asset_selection(store, brand_name, brief):
+    assignment = store.get_brand_assets(brand_name)
+    if not assignment['assigned']:
+        return
+    references = brief.get('references') or {}
+    if not isinstance(references, dict):
+        raise HTTPException(400, 'references must be an object')
+    names = references.get('imageAssets') or []
+    if not isinstance(names, list) or any(not isinstance(n, str) for n in names):
+        raise HTTPException(400, 'references.imageAssets must be an array of names')
+    outside = sorted(set(names) - set(assignment['names']))
+    if outside:
+        raise HTTPException(422, 'selected assets do not belong to this brand: ' + ', '.join(outside))
+
+
+def _project_or_404(project_id):
+    project = _deps().get_project(project_id)
+    if project is None:
+        raise HTTPException(404, "unknown project")
+    return project
+
+
+def _pin_brand(store, brand_name, brand_version=None):
+    """Resolve a brand name (+ optional version) to the id the project pins.
+    Explicit 404 — a project naming a missing brand is a mistake, not a
+    fall-back-to-default case."""
+    rec = store.get_brand_profile(brand_name, version=brand_version)
+    if rec is None:
+        raise HTTPException(
+            404, f"unknown brand {brand_name!r}"
+                 + (f" version {brand_version}" if brand_version else ""))
+    return rec
+
+
+def _check_overrides(overrides, profile):
+    if overrides is not None and not isinstance(overrides, dict):
+        raise HTTPException(400, "'overrides' must be an object")
+    errors = validate_overrides(overrides, profile)
+    if errors:
+        raise HTTPException(422, detail={"errors": errors})
+
+
+def _project_out(project):
+    """Project + a summary of what its effective profile looks like, so the
+    UI can show the break-out at a glance."""
+    effective = _effective_profile(project)
+    return {**project, "effective": {
+        "brand": effective.get("name"),
+        "swatches": len(effective.get("swatches", [])),
+        "fonts": len(effective.get("fonts", [])),
+        "rules": effective.get("rules", {}),
+        "overridden": bool(project.get("overrides")),
+        "sha256": content_hash(effective),
+    }}
+
+
+@app.post("/projects")
+def project_create(payload: dict = Body(...)):
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "project needs a 'name'")
+    store = _deps()
+    brand_version_id = None
+    base_profile = _default_profile()
+    if payload.get("brand"):
+        rec = _pin_brand(store, payload["brand"],
+                         payload.get("brand_version"))
+        brand_version_id = rec["id"]
+        base_profile = rec["profile"]
+    overrides = payload.get("overrides")
+    _check_overrides(overrides, base_profile)
+    pid = _workspace_action(lambda: store.create_project(
+        name, brand_version_id=brand_version_id,
+        brief=payload.get("brief"), overrides=overrides,
+        campaign_id=payload.get('campaign_id')))
+    if pid is None:
+        raise HTTPException(409, f'project "{name}" already exists')
+    return _project_out(store.get_project(pid))
+
+
+@app.get("/projects")
+def projects_list(include_archived: bool = False):
+    return {"projects": _deps().list_projects(
+        include_archived=include_archived)}
+
+
+@app.get("/projects/{project_id}")
+def project_detail(project_id: str):
+    store = _deps()
+    project = _project_or_404(project_id)
+    out = _project_out(project)
+    out["concepts"] = [
+        {**c, "latest": _latest_summary(store, c["id"])}
+        for c in store.concepts_for_project(project_id)]
+    return out
+
+
+@app.patch("/projects/{project_id}")
+def project_update(project_id: str, payload: dict = Body(...)):
+    """Partial update of the directional layer: brief, overrides, status,
+    or an explicit brand repin. Overrides always revalidate against the
+    (possibly repinned) brand version."""
+    store = _deps()
+    project = _project_or_404(project_id)
+    fields = {}
+    if "brand" in payload:
+        if payload["brand"]:
+            rec = _pin_brand(store, payload["brand"],
+                             payload.get("brand_version"))
+            fields["brand_version_id"] = rec["id"]
+            base_profile = rec["profile"]
+        else:
+            fields["brand_version_id"] = None
+            base_profile = _default_profile()
+    elif project.get("brand_version_id"):
+        rec = store.get_brand_version(project["brand_version_id"])
+        base_profile = rec["profile"] if rec else _default_profile()
+    else:
+        base_profile = _default_profile()
+    if "overrides" in payload:
+        fields["overrides"] = payload["overrides"]
+    overrides = fields.get("overrides", project.get("overrides"))
+    _check_overrides(overrides, base_profile)
+    if "brief" in payload:
+        fields["brief"] = payload["brief"]
+    if 'campaign_id' in payload:
+        fields['campaign_id'] = payload['campaign_id']
+    if "status" in payload:
+        if payload["status"] not in ("active", "archived"):
+            raise HTTPException(400, "status is 'active' or 'archived'")
+        fields["status"] = payload["status"]
+    return _project_out(_workspace_action(lambda: store.update_project(project_id, **fields)))
+
+
+@app.post("/projects/{project_id}/generate")
+def project_generate(project_id: str, payload: dict = Body(default={})):
+    """BRF-1 via the project layer: fan out against the pinned brand version
+    + overrides. The brief defaults to the project's; the effective profile
+    and override set snapshot onto the job for audit (BRAND-6)."""
+    store = _deps()
+    project = _project_or_404(project_id)
+    if project["status"] != "active":
+        raise HTTPException(409, "project is archived — reactivate it first")
+    brief = payload.get("brief") or project["brief"]
+    if not brief:
+        raise HTTPException(400, "project has no brief — supply one in the"
+                                 " payload or PATCH it onto the project")
+    _check_brief(brief)
+    profile = _effective_profile(project)
+    _check_brand_asset_selection(store, profile.get('name'), brief)
+    _gen_deps()  # only initialize model dependencies after checking the brief
+    n = max(1, min(int(payload.get("n", 6)), 8))
+    config = resolve_preset(payload.get("engine", "standard"))
+    try:
+        runtime = load_schema_route(payload.get(
+            "schema_version", DOCUMENT_SCHEMA_VERSION))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    profile = _effective_profile(project)
+    brand_meta = {
+        "brand": profile.get("name"),
+        "brand_version_id": project.get("brand_version_id"),
+        "brand_version": project.get("brand_version"),
+        "overrides": project.get("overrides"),
+        "effective_sha256": content_hash(profile),
+    }
+    job_id = store.create_job(brief, n, project_id=project_id,
+                              brand=brand_meta)
+    threading.Thread(target=_run_job,
+                     args=(job_id, brief, n, config, profile, runtime,
+                           project_id),
+                     daemon=True).start()
+    return {"job_id": job_id, "project_id": project_id, "status": "queued",
+            "n": n, "brand": brand_meta,
+            "schema_version": runtime["version"],
+            "models": {"fast": config.fast_model,
+                       "strong": config.strong_model}}
 
 
 @app.get("/concepts")
@@ -306,10 +609,11 @@ def concepts(include_discarded: bool = False):
 
 
 @app.get("/stats")
-def stats(job_id: Optional[str] = None):
-    """ADM-1 v1: usage + validation rollups, global or per-job. Read-only
-    aggregation over the persisted doc_version provenance."""
-    return _deps().usage_stats(job_id=job_id)
+def stats(job_id: Optional[str] = None, project_id: Optional[str] = None):
+    """ADM-1 v1: usage + validation rollups — global, per-job, or
+    per-project. Read-only aggregation over the persisted doc_version
+    provenance."""
+    return _deps().usage_stats(job_id=job_id, project_id=project_id)
 
 
 @app.post("/concepts/{concept_id}/discard")
@@ -445,11 +749,11 @@ def download_document(version_id: str):
 def download_sla(version_id: str):
     """EXP-1: the escape hatch — compile this version (brand merged) to a
     Scribus .sla a designer can open and finish by hand."""
-    store, s = _gen_deps()
+    store, s = _render_deps()
     v = store.get_version(version_id)
     if v is None:
         raise HTTPException(404, "unknown version")
-    profile = _resolve_profile(_brand_for_version(store, v))
+    profile = _profile_for_version(store, v)
     asset_map = {meta["name"]: store.get_asset(meta["name"])
                  for meta in store.list_assets()}
     staged, _, image_meta = resolve_srcs(
@@ -470,20 +774,17 @@ def download_bundle(version_id: str, request: Request):
     Layout:  ide8-<id8>/document.sla        image srcs resolved to assets/…
              ide8-<id8>/assets/<name>.<ext> every referenced asset
              ide8-<id8>/manifest.json       concept/version ids, brand, hashes
-             ide8-<id8>/profile.json        the profile the .sla was compiled
-                                            against (BRAND-4 note: best-effort
-                                            live resolution until profile
-                                            versions are pinned per version)
+             ide8-<id8>/profile.json        the original effective profile
     """
     import hashlib
     import io as _io
     import zipfile
 
-    store, s = _gen_deps()
+    store, s = _render_deps()
     v = store.get_version(version_id)
     if v is None:
         raise HTTPException(404, "unknown version")
-    profile = _resolve_profile(_brand_for_version(store, v))
+    profile = _profile_for_version(store, v)
     merged = merge_profile(v["document"], profile)
     asset_map = {meta["name"]: store.get_asset(meta["name"])
                  for meta in store.list_assets()}
@@ -533,11 +834,12 @@ def mutate(version_id: str, payload: dict = Body(...)):
     instruction = (payload.get("instruction") or "").strip()
     if not instruction:
         raise HTTPException(400, "payload needs an 'instruction' string")
-    store, s = _gen_deps()
+    store = _deps()
     parent = store.get_version(version_id, include_document=False)
-    profile = _resolve_profile(_brand_for_version(store, parent))
     if parent is None:
         raise HTTPException(404, "unknown version")
+    profile = _profile_for_version(store, parent)
+    _, s = _gen_deps()
     try:
         runtime = load_schema_route(parent["schema_version"])
     except ValueError as exc:
@@ -547,7 +849,8 @@ def mutate(version_id: str, payload: dict = Body(...)):
             version_id, instruction, store=store, client=s["client"],
             render=s["render"], pack=runtime["pack"],
             schema_json=runtime["schema_json"], schema_path=runtime["schema_path"],
-            profile=profile, expected_version=runtime["version"])
+            profile=profile, expected_version=runtime["version"],
+            text_changes=payload.get("text_changes"))
     except KeyError:
         raise HTTPException(404, "unknown version")
     if new_id is None:
@@ -584,10 +887,11 @@ def promote_to_template(version_id: str, payload: dict = Body(...)):
     v = store.get_version(version_id)
     if v is None:
         raise HTTPException(404, "unknown version")
+    profile = _profile_for_version(store, v)  # reject unreproducible template sources
     errors = validate_bindings(v["document"], bindings or {})
     if errors:
         raise HTTPException(422, detail={"errors": errors})
-    brand = _brand_for_version(store, v)
+    brand = profile.get("name")
     tid = store.create_template(
         name, version_id, v["document"], bindings, brand,
         v.get("schema_version") or "0.1")
@@ -614,9 +918,9 @@ def template_detail(template_id: str):
 def _run_template_rows(run_id, template, rows, package):
     """TPL-2/3 worker: bind, validate, render each row. Row failures are
     recorded per-row and never batch-fatal."""
-    store, s = _gen_deps()
-    profile = _resolve_profile(template["brand"])
+    store, s = _render_deps()
     try:
+        profile = profile_for_version(store, store.get_version(template["source_version_id"]))
         runtime = load_schema_route(template["schema_version"])
     except ValueError as exc:
         store.set_template_run(run_id, "failed", error=str(exc))
@@ -674,7 +978,7 @@ def template_run(template_id: str, payload: dict = Body(...)):
         raise HTTPException(413, f"{len(rows)} rows — cap is "
                                  f"{TEMPLATE_RUN_MAX_ROWS} per run")
     package = bool(payload.get("package", True))
-    store, _ = _gen_deps()  # fail on missing deps in-request
+    store, _ = _render_deps()
     template = store.get_template(template_id)
     if template is None:
         raise HTTPException(404, "unknown template")
@@ -712,3 +1016,12 @@ def template_output_pdf(output_id: str):
         content=o["pdf"], media_type="application/pdf",
         headers={"Content-Disposition":
                  f'attachment; filename="ide8-{output_id[:8]}.pdf"'})
+
+
+from identity_media import make_router as identity_media_router  # noqa: E402
+app.include_router(identity_media_router(_deps))
+
+from pdf_extraction import make_router as pdf_extraction_router
+from client_reviews import make_router as client_reviews_router
+app.include_router(pdf_extraction_router(_deps, lambda: _gen_deps()[1]['client']))
+app.include_router(client_reviews_router(_deps))

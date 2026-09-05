@@ -4,10 +4,24 @@
 
 | | |
 |---|---|
-| Version | 0.5 |
-| Date | 16 July 2026 |
+| Version | 0.6 |
+| Date | 5 September 2026 |
 | Owner | Luke — Print Services Director, Dimension Development Ltd |
 | Status | In development. M0 + M1 complete; M2 (internal MVP UI) in progress |
+
+**Changes in v0.6** — Brand/campaign/project workspaces, a structured visual identity board with generated DESIGN.md, source-linked PDF interpretation and client review screens are implemented locally. Historical profile snapshots, mutation copy/format protection and proof/export integrity were hardened. The status below distinguishes implementation from launch acceptance; client authentication, public hosting and production release integration are not complete.
+
+### September implementation checkpoint
+
+| Area | Implemented locally | Still required |
+|---|---|---|
+| Brand workspace | Separate campaigns/projects, scoped assets, identity draft/review/publication, immutable project pins | Separately versioned campaign packs and automatic scope-rule resolution |
+| PDF import assist (BRAND-5) | Rendered pages + text → Opus draft findings with quotes/pages/confidence; selective import and review gate | Broader document-quality evaluation; automatic working-definition proposals are not applied |
+| Client review (REV-5/6/9, partial) | Selected exact proofs, comments/change requests/approval, hashes, expiry/revocation and append-only decision history | Verified named approvers, voting, complete release/audit workflow and external rollout |
+| Integrity | Effective-profile snapshots, copy/asset/format-preserving mutation, complete attempt artifacts, reproducible craft bundles | Pixel-aware photographic contrast and production acceptance |
+| Delivery | Separate restricted review server and local browser trials | Public HTTPS, studio authentication, durable distributed jobs, backup/deployment operations |
+
+These changes do not mark M2 or M3 complete. Detailed evidence and limits are in [the workspace note](BRAND-WORKSPACE-2026-09-05.md), [integrity note](INTEGRITY-FIXES.md) and [PDF/client-review guide](PDF-EXTRACTION-AND-CLIENT-REVIEW-2026-09-05.md). The proposals under `newFeatures/` remain future design inputs, not implemented capabilities.
 
 **Changes in v0.5** — Templates & volume production added as §7.12 (TPL-1..5), formalising the Phase-3 "template/kit system" after a study of CHILI GraFx: approved concepts promote to slot-bound templates; bind-and-render is deterministic and LLM-free, making volume/VDP output near-zero marginal cost. Animated/digital-channel output and canvas (WYSIWYG) editing explicitly rejected — NL mutation + slot forms remain the editing surface · Craft-pass seamlessness added to EXP (EXP-5 asset-complete bundle, EXP-6 one-click open in Scribus, EXP-7 return-to-platform from inside Scribus) — EXP-3 round-trip is the anchor; these remove its friction · `template` entity added to §10 · hosted-Scribus-in-browser recorded as an open question.
 
@@ -100,10 +114,14 @@ IDs are stable for task decomposition. Priority: **P0** = MVP-blocking, **P1** =
 - **BRAND-3 (P0)** Admin CRUD UI for profiles, with visual swatch/style preview.
 - **BRAND-4 (P1)** Profile versions are immutable once used by a project (reproducibility).
 - **BRAND-5 (P2)** Import assist: extract candidate swatches/fonts from an uploaded brand guideline PDF for human confirmation.
+  Local first slice extracts source-linked guidance and colour/font references into draft cards. Review or reject findings before publication; working swatches/fonts are edited explicitly in Definitions. Source numeric transcriptions remain evidence and cannot silently replace working values.
+- **BRAND-6 (P1)** Campaign break-out: a project may extend or relax its pinned brand profile only through an explicit override set — additions under new names (never redefinitions of brand-named entries), rule changes each carrying a recorded reason, and palette/font narrowing. Overrides are validated in the shared `{code, path, message}` shape and recorded with every generation job for audit; the brand profile itself is never mutated.
 
 ### 7.3 Brief intake (BRF)
 
 - **BRF-1 (P0)** Brief form: title, brand profile, formats (named sizes or custom mm/pt + orientation), copy deck (structured: headline, subhead, body, legal), mandatory elements, tone/direction free text, reference uploads.
+  Existing projects must be selectable in the form: load their saved copy (including mandatory wording), format and image selections, show the pinned brand version, save edits, and generate through the project endpoint so brand provenance is retained. Campaigns group projects and retain range metadata. Show image previews and report failed library loads explicitly.
+  Custom width/height can be entered in mm or points, with orientation derived from the dimensions. Preserve exact saved point values; block empty, zero or invalid dimensions before save/generation.
 - **BRF-2 (P0)** Formats support multiple outputs per brief; one is flagged `master`. Each format is a separate document — formats are never mixed within a document.
 - **BRF-3 (P1)** Brief templates ("gondola end kit") pre-populate format sets.
 - **BRF-4 (P1)** Briefs sync to Monday.com as items via n8n (create + status mirror).
@@ -113,8 +131,11 @@ IDs are stable for task decomposition. Priority: **P0** = MVP-blocking, **P1** =
 - **GEN-1 (P0)** A generation worker runs a Claude API tool-use loop: emit document JSON → validate → render proof → inspect raster (vision) → mutate → repeat until self-critique passes or iteration cap (default 4) reached.
 - **GEN-2 (P0)** Fan-out: produce N concepts per brief with explicit diversity instruction (layout archetypes, not colourway tweaks). Concepts generate in parallel.
 - **GEN-3 (P0)** All model output is validated against the document schema (formal JSON Schema) before compile; invalid output triggers structured repair, never silent acceptance.
+  Repair feedback must identify the expected top-level document version, exact page bounds and usable brand-colour pairings. Missing versions are not silently invented. Retain emitted candidates and response stop reasons with attempt diagnostics; incomplete tool output must not be misreported as a version mismatch. All deterministic failure paths participate in configured model escalation.
 - **GEN-4 (P0)** System prompt assembles from: document-schema spec, brand profile, brief, few-shot exemplars. Versioned as `prompt_pack` rows for reproducibility.
+  Image-placement instructions must match the active schema. Supply computed geometry using the renderer's named-size table and solid-fill contrast estimates using the same preflight calculation as validation; estimates do not certify photographic contrast or print colour.
 - **GEN-5 (P0)** Model routing: fast model (Sonnet-class) for fan-out and mutations; strong model escalation for failed self-critique or flagged-hard briefs. Per-project token/cost metering.
+  Failed generations retain known usage even when a later call or renderer raises. Aggregate costs include no-version failures without fabricating missing historical tokens or calls. Bounded benchmark runners reserve a conservative maximum before every paid call through a shared budget ledger; uncertain outcomes retain their reservation and stop further dispatch.
 - **GEN-6 (P0)** Every accepted document is persisted as an immutable version with provenance: model, prompt pack version, parent version, document-schema version, validation report, proof raster.
 - **GEN-7 (P0)** Mutation API: natural-language instruction + target concept → document diff → new version. Surface a before/after proof pair.
 - **GEN-8 (P1)** "More like this": seed fan-out from an existing concept.
@@ -151,6 +172,7 @@ Deterministic, ordered cheapest-first. VAL-1..5 run pre-render; VAL-6 reads back
 - **REV-4 (P1)** Side-by-side compare of any two versions or concepts.
 - **REV-5 (P1)** Client review mode: stripped-down grid, comment + vote per concept, no internal metadata (costs, prompts) visible.
 - **REV-6 (P1)** Approval gate: named approver(s) per project; approving locks the version (immutable), records approver, timestamp, and exact document/proof hashes.
+  Local review links implement exact-version decisions with a self-declared name, timestamp and document/proof hashes. They do not yet satisfy verified named-approver authentication. Model self-approval remains separate. Expired/revoked links reject access; superseded or discarded versions reject approval; a decision never carries forward to a new version.
 - **REV-7 (P1)** Status workflow: `draft → internal_review → client_review → approved → released` mirrored to Monday.com.
 - **REV-8 (P2)** @mentions and notification digests (email via n8n).
 - **REV-9 (P1)** Audit log view: every version, comment, approval, export per project.
@@ -232,7 +254,9 @@ Stack choices follow the established house pattern: FastAPI microservices in Doc
 
 ## 10. Data model (core entities)
 
-`brand_profile` (versioned JSON, immutable-once-used) · `project` (brief metadata, brand_profile_version, status) · `format` (per-project output spec, master flag) · `concept` (project-scoped, discard flag) · `doc_version` (concept-scoped, immutable: document JSON, document-schema version, parent_version, provenance — model, prompt_pack, validation_report, proof_path, hand_finished flag) · `comment` (anchored to concept/version/region; author role) · `approval` (version hash, approver, timestamp) · `release` (manifest, preflight result, monday_item) · `prompt_pack` (versioned) · `usage_event` (tokens, renders, cost) · `template` (promoted from an approved doc_version: document ref, bindings map, locked items; versioned, immutable-once-used) · `template_run` (template version, input rows ref, per-row status + output hashes).
+The SQLite implementation additionally includes `campaign`, `identity_draft`, `identity_source`, `identity_extraction`, brand-asset membership, and `client_review`/`client_review_item`/`client_review_event`. Source uploads and published profiles preserve their original data; draft findings and client decision events have separate lifecycles. A campaign groups projects; the project is the brand-version pinning boundary.
+
+`brand_profile` (versioned JSON, immutable-once-used) · `project` (brief metadata, brand_profile_version, brand_overrides — BRAND-6, status) · `format` (per-project output spec, master flag) · `concept` (project-scoped, discard flag) · `doc_version` (concept-scoped, immutable: document JSON, document-schema version, parent_version, provenance — model, prompt_pack, validation_report, proof_path, hand_finished flag) · `comment` (anchored to concept/version/region; author role) · `approval` (version hash, approver, timestamp) · `release` (manifest, preflight result, monday_item) · `prompt_pack` (versioned) · `usage_event` (tokens, renders, cost) · `template` (promoted from an approved doc_version: document ref, bindings map, locked items; versioned, immutable-once-used) · `template_run` (template version, input rows ref, per-row status + output hashes).
 
 ## 11. Milestones
 
@@ -279,3 +303,4 @@ JSON document → Python compiler (stdlib-only, donor-template architecture) →
 | 0.3 | 11 Jun 2026 | M0 exit recorded; spot-separation risk closed; PDF/X-4 default; RND-4 measurements |
 | 0.4 | 11 Jun 2026 | M1 exit recorded (live costs, escalation verified); GEN-6/7 + VAL-7 live; M2 slice 1 shipped |
 | 0.5 | 16 Jul 2026 | §7.12 TPL family (templates & volume production, post-CHILI-GraFx study); EXP-5..7 seamless craft pass; `template` entity; hosted-Scribus open question |
+| 0.6 | 5 Sep 2026 | Studio/identity workspaces, PDF interpretation, local client-review foundation and integrity hardening; explicit remaining launch gaps |

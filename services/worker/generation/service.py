@@ -13,11 +13,25 @@ if str(WORKER_ROOT) not in sys.path:
 
 from generation.loop import generate_concept  # noqa: E402
 from generation.mutation import mutate_document  # noqa: E402
+from provenance import profile_for_version  # noqa: E402
 
-def _asset_map(store):
-    """All uploaded assets with bytes, keyed by name (RND-5)."""
+def _asset_map(store, profile=None, brief=None):
+    """Only the brand's assigned and brief-selected assets reach the model.
+
+    Legacy brands with no assignment retain their existing library. Historical
+    export paths do not use this filter and still resolve immutable assets.
+    """
+    allowed = None
+    if profile is not None:
+        membership = store.get_brand_assets(profile.get('name'))
+        if membership['assigned']:
+            allowed = set(membership['names'])
+    selected = ((brief or {}).get('references') or {}).get('imageAssets')
+    if isinstance(selected, list):
+        allowed = set(selected) if allowed is None else allowed & set(selected)
     return {meta["name"]: store.get_asset(meta["name"])
-            for meta in store.list_assets()}
+            for meta in store.list_assets()
+            if allowed is None or meta['name'] in allowed}
 
 
 def _failure_record(result):
@@ -36,19 +50,21 @@ def _failure_record(result):
         "model_history": result.model_history,
         "validation": result.validation,
         "cost_usd": (result.usage or {}).get("cost_usd", 0.0),
+        "usage": result.usage,
     }
 
 
 def generate_and_store(brief, *, n, store, client, render, pack,
                        schema_json, schema_path, profile, config=None,
-                       job_id=None, expected_version=None):
+                       job_id=None, project_id=None, expected_version=None):
     expected_version = expected_version or pack["version"]
     archetypes = pack["archetypes"]
-    assets = _asset_map(store)
+    assets = _asset_map(store, profile, brief)
 
     def run_one(i):
         archetype = archetypes[i % len(archetypes)]
-        concept_id = store.create_concept(brief, archetype, job_id=job_id)
+        concept_id = store.create_concept(brief, archetype, job_id=job_id,
+                                          project_id=project_id)
         try:
             r = generate_concept(
                 brief, profile, archetype, client=client, render=render,
@@ -80,6 +96,7 @@ def generate_and_store(brief, *, n, store, client, render, pack,
                 usage=r.usage,
                 approved=r.approved,
                 origin="generation",
+                effective_profile=profile,
                 proof_png=(base64.b64decode(r.proof_png_b64)
                            if r.proof_png_b64 else None))
         return {
@@ -108,19 +125,22 @@ def generate_and_store(brief, *, n, store, client, render, pack,
 
 def mutate_and_store(version_id, instruction, *, store, client, render,
                      pack, schema_json, schema_path, profile, config=None,
-                     expected_version=None):
+                     expected_version=None, text_changes=None):
     """GEN-7: load version -> mutate -> persist child version. Returns
     (new_version_id, MutationResult)."""
     parent = store.get_version(version_id)
     if parent is None:
         raise KeyError(f"unknown version {version_id}")
     expected_version = expected_version or pack["version"]
+    profile = profile_for_version(store, parent)
+    concept = store.get_concept(parent["concept_id"])
 
     r = mutate_document(
         parent["document"], instruction, profile, client=client,
         render=render, pack=pack, schema_json=schema_json,
         schema_path=schema_path, config=config,
-        assets=_asset_map(store), expected_version=expected_version)
+        assets=_asset_map(store, profile, (concept or {}).get('brief')), expected_version=expected_version,
+        brief=(concept or {}).get("brief"), text_changes=text_changes)
 
     new_id = None
     if r.document is not None:
@@ -132,6 +152,8 @@ def mutate_and_store(version_id, instruction, *, store, client, render,
             validation=r.validation or {},
             usage=r.usage,
             origin="mutation",
+            effective_profile=profile,
+            text_changes=text_changes,
             mutation_instruction=instruction,
             parent_version_id=version_id,
             proof_png=(base64.b64decode(r.proof_png_b64)

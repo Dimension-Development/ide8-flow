@@ -6,6 +6,7 @@ services/ui/node_modules
 services/ui/dist
 services/worker/data
 services/worker/out
+out
 docs
 briefs
 CLAUDE.md

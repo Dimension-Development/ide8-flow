@@ -56,7 +56,7 @@ class TestBundle(unittest.TestCase):
         cid = self.store.create_concept({"brand": None}, "")
         vid = self.store.add_version(
             cid, doc, schema_version="0.1", prompt_pack="0.1",
-            validation={"ok": True})
+            validation={"ok": True}, effective_profile=self.appmod._default_profile())
         return cid, vid
 
     def _zip(self, resp):

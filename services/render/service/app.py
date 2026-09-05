@@ -97,8 +97,15 @@ def _overflows(pdf: Path):
     """VAL-6 report written by export_pdf.py next to the PDF."""
     report = Path(str(pdf) + ".report.json")
     if not report.exists():
-        return []
-    return json.loads(report.read_text()).get("overflows", [])
+        raise HTTPException(status_code=500, detail="missing overflow validation report")
+    try:
+        result = json.loads(report.read_text())
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail="unreadable overflow validation report") from exc
+    if (not isinstance(result, dict) or "error" in result
+            or not isinstance(result.get("overflows"), list)):
+        raise HTTPException(status_code=500, detail="incomplete overflow validation report")
+    return result["overflows"]
 
 
 async def _read_render_request(request: Request):
@@ -169,4 +176,6 @@ async def package(request: Request):
         workdir = Path(td)
         _stage_assets(workdir, assets)
         pdf = _export_pdf(sla_bytes, "package", workdir)
+        if _overflows(pdf):
+            raise HTTPException(status_code=422, detail="cannot package artwork with text overflow")
         return Response(content=pdf.read_bytes(), media_type="application/pdf")

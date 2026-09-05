@@ -32,14 +32,22 @@ Three services under `services/`, communicating over HTTP:
   Claude tool-use loop (emit_document → deterministic validation VAL-1..5 →
   render proof → vision self-critique → repair/revise); `service.py` is the
   single brief→store fan-out path; `store.py` is the immutable
-  concept/doc_version store (SQLite `data/ide8.db`, immutability enforced by
-  DB triggers — Supabase Postgres is the M2 migration boundary). FastAPI in
+  concept/doc_version store plus the brand/project layer — versioned
+  `brand_version` rows and mutable `project` rows (projects pin a brand
+  version + carry BRAND-6 overrides) — (SQLite `data/ide8.db`, immutability
+  enforced by DB triggers — Supabase Postgres is the M2 migration boundary). FastAPI in
   `app.py`; CLI in `generate.py`. Model routing (GEN-5): sonnet fan-out,
   opus escalation after repeated failures; per-call cost metering persists
   with each version.
 - **`services/ui/`** — React 19 / Vite / Tailwind 4 review UI: brief form,
-  proof grid, concept detail (version timeline + NL mutation box), brands
-  admin, dashboard.
+  studio → brand → campaign/project workspaces, visual identity board,
+  PDF-extraction review, brief/proof/refinement screens and client review.
+- **Reference ingestion and client delivery** — `pdf_extraction.py` reads
+  rendered PDF pages plus text into persisted draft findings; Poppler is required.
+  `client_reviews.py` records exact-version reviews separately from AI checks.
+  `review_app.py` is the restricted client-only HTTP surface; run its `build_app`
+  factory with the same `WORKER_DB` and a compiled `UI_DIST`. Keep the studio API
+  private. Details: `docs/PDF-EXTRACTION-AND-CLIENT-REVIEW-2026-09-05.md`.
 
 Validation errors everywhere share the compiler's `{code, path, message}`
 shape (GEN-3) — the repair loop depends on it.
@@ -76,15 +84,18 @@ docker run -d --rm -p 8127:8000 --name ide8-rnd ide8-render   # render :8127
 # tools (preview_start {name: "worker"} / {name: "ui"}), not Bash
 ```
 
-The worker needs `ANTHROPIC_API_KEY` for live generation (tests don't). It
-lives in `~/.zshrc`, but sourcing the full .zshrc fails non-interactively —
-load it with `eval "$(grep '^export ANTHROPIC_API_KEY=' ~/.zshrc)"`.
+The worker needs `ANTHROPIC_API_KEY` for live generation and PDF interpretation
+(tests use fakes). Supply it through the process environment or deployment secret
+manager; never print or commit credentials.
 
 Key worker env vars (defaults in `app.py`): `RENDER_URL`
 (http://localhost:8127), `WORKER_DB`, `PROMPT_PACK` (0.1), `BRAND_PROFILE`
 (env-default fallback when a brief names no stored brand),
 `FANOUT_CONCURRENCY` (3 — throttled for API Tier 1 rate limits),
 `ASSET_MAX_BYTES` / `ASSET_MAX_DIM`.
+Client delivery adds `CLIENT_REVIEW_BASE_URL` on the studio worker and `UI_DIST`
+on the restricted review server. These must target the same database. Local
+No7 benchmark overrides and source material live under ignored `out/`.
 
 ## Invariants and gotchas
 
@@ -97,7 +108,22 @@ Key worker env vars (defaults in `app.py`): `RENDER_URL`
   sequentially from `ITEM_ID_BASE`. PDF output is NOT byte-stable; only the
   SLA is golden.
 - **Store immutability is DB-trigger enforced**, not convention. Don't UPDATE
-  doc_version rows; new state = new version.
+  doc_version rows; new state = new version. The same applies to
+  `brand_version` rows (BRAND-4): saving a brand appends the next version,
+  and projects pin an exact version id — FK-blocked from deletion while
+  pinned.
+- **Brand is king; projects deviate only via BRAND-6 overrides**
+  (`brand.apply_overrides`): additions under new names (never redefinitions
+  of brand entries), rule changes each carrying a `reason`, palette/font
+  narrowing. Jobs snapshot the brand provenance (`job.brand_json`, effective
+  profile hash) at generation time because project rows stay mutable.
+- **Identity extraction is a draft**, not an approval. Keep source quotes/pages,
+  model confidence and provisional decisions distinct from reviewed guidance.
+  Draft cards block publication; source colour transcriptions never override
+  working swatches. Generate `DESIGN.md` from the structured identity.
+- **Client decisions refer to exact versions.** Never infer them from the model's
+  `approved` flag or transfer them to a newer version. Review links are bearer
+  capabilities; names are self-declared until verified authentication is added.
 - Scribus headless: `print()` inside `scribus -g -py` scripts never reaches
   stdout — write to a file. `PDFfile.outdst = 1` (printer) is required or
   spot colours silently convert to RGB. PDF/X version enums: 10 = X-4,

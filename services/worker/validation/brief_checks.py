@@ -9,11 +9,13 @@
   exist as named items (complements the profile's own mandatory list in
   brand_rules — the brief can require campaign-specific items like a QR).
 
-Only runs when a brief is supplied (generation). Mutations don't re-check copy
-integrity — a mutation may legitimately be an instruction to change the copy.
+Generation checks the brief; mutations additionally protect their parent version's
+content, with exact replacements permitted only through explicit text_changes.
 """
 
 import re
+
+from validation import format_check
 
 _QUOTES = {"‘": "'", "’": "'", "“": '"', "”": '"'}
 _DASHES = {"–": "-", "—": "-", "−": "-"}
@@ -39,11 +41,10 @@ def _document_text(document):
             if item.get("type") != "text":
                 continue
             for para in item.get("paragraphs", []):
-                if isinstance(para.get("text"), str):
-                    parts.append(para["text"])
-                for run in para.get("runs", []) or []:
-                    if isinstance(run.get("text"), str):
-                        parts.append(run["text"])
+                # Match emit_story: non-empty runs take precedence over text,
+                # and adjacent runs join without inserted whitespace.
+                runs = para.get("runs") or [{"text": para.get("text", "")}]
+                parts.append("".join(run.get("text", "") for run in runs))
     return _norm(" ".join(parts))
 
 
@@ -51,6 +52,9 @@ def check(document, brief):
     errors, warnings = [], []
     if not isinstance(brief, dict):
         return errors, warnings
+
+    if "format" in brief:
+        errors.extend(format_check.check(document, brief["format"]))
 
     # ---- brief mandatory elements (named items) --------------------------
     present = {item.get("name")
@@ -83,7 +87,8 @@ def check(document, brief):
     for s in brief.get("mandatoryCopy", []) or []:
         required("mandatory", s, hard=True)
     required("subhead", copy.get("subhead"), hard=False)
-    for i, para in enumerate(copy.get("body", []) or []):
+    body = copy.get("body", []) or []
+    for i, para in enumerate([body] if isinstance(body, str) else body):
         required(f"body[{i}]", para, hard=False)
 
     return errors, warnings

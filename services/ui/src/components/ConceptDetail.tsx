@@ -90,7 +90,18 @@ export default function ConceptDetail({
               )}
             </div>
           )}
+          {selected && (selected.validation.errors?.length > 0 || selected.validation.warnings?.length > 0) && (
+            <details className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
+              <summary className="cursor-pointer font-semibold">Checks to review</summary>
+              <ul className="mt-2 space-y-2">
+                {[...(selected.validation.errors ?? []), ...(selected.validation.warnings ?? [])].map((issue, i) => (
+                  <li key={i}>{issue.message}</li>
+                ))}
+              </ul>
+            </details>
+          )}
           <MutateBox
+            key={selected?.id}
             selected={selected}
             onDone={(m) => {
               setMutation(m);
@@ -186,6 +197,25 @@ function MutateBox({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [copyFields, setCopyFields] = useState<{ name: string; text: string }[]>([]);
+  const [textChanges, setTextChanges] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let active = true;
+    if (selected) api.document(selected.id).then((doc) => {
+      if (!active) return;
+      const items = doc.pages.flatMap((page) => page.items);
+      setCopyFields(items.filter((item) => item.type === "text" && item.name &&
+        items.filter((other) => other.name === item.name).length === 1
+      ).map((item) => ({
+        name: item.name!,
+        text: (item.paragraphs ?? []).map((p) =>
+          p.runs?.length ? p.runs.map((r) => r.text).join("") : (p.text ?? "")
+        ).join("\n"),
+      })));
+    }).catch((e) => { if (active) setError(String(e)); });
+    return () => { active = false; };
+  }, [selected?.id]);
+
   if (!selected) return null;
 
   const submit = async () => {
@@ -193,7 +223,7 @@ function MutateBox({
     setBusy(true);
     setError(null);
     try {
-      onDone(await api.mutate(selected.id, instruction.trim()));
+      onDone(await api.mutate(selected.id, instruction.trim(), textChanges));
       setInstruction("");
     } catch (e) {
       setError(String(e));
@@ -213,9 +243,31 @@ function MutateBox({
         className="w-full rounded-lg border border-ink/15 bg-white p-2 text-sm outline-none focus:border-brand"
         disabled={busy}
       />
+      <p className="mt-2 text-xs text-ink-soft">
+        Copy and page format are preserved. To change wording, enter the exact replacement below.
+      </p>
+      {copyFields.length > 0 && <details className="mt-3 text-sm">
+        <summary className="cursor-pointer">Edit copy ({Object.keys(textChanges).length} changed)</summary>
+        {copyFields.map(({ name, text }) => <label key={name} className="mt-3 block">
+          <span className="text-xs font-semibold">{name}</span>
+          <textarea
+            aria-label={`Replacement copy for ${name}`}
+            value={textChanges[name] ?? text}
+            onChange={(e) => setTextChanges((current) => {
+              const next = { ...current };
+              if (e.target.value === text) delete next[name];
+              else next[name] = e.target.value;
+              return next;
+            })}
+            rows={3}
+            disabled={busy}
+            className="w-full rounded-lg border border-ink/15 bg-white p-2 text-sm"
+          />
+        </label>)}
+      </details>}
       <button
         onClick={submit}
-        disabled={busy || !instruction.trim()}
+        disabled={busy || !instruction.trim() || Object.values(textChanges).some((text) => !text.trim())}
         className="mt-2 w-full rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-cream transition hover:bg-ink-soft disabled:opacity-40"
       >
         {busy ? "Mutating — validating & rendering (≈1 min)…" : "Mutate"}

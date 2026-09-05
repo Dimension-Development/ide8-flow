@@ -34,7 +34,8 @@ def run_validation(document, profile, schema_path, asset_names=(), brief=None):
     """Returns {ok, errors, warnings}. ok == no errors (warnings allowed).
 
     `brief`, when supplied (generation), enables brief-derived checks: VAL-5
-    copy integrity and brief-level mandatory elements. Mutations pass no brief.
+    copy integrity, format and brief-level mandatory elements. Mutations also
+    enforce their parent version's protected content via mutation_checks.
     """
     errors = schema_check.check(document, schema_path)
     if errors:
@@ -54,7 +55,7 @@ def run_validation(document, profile, schema_path, asset_names=(), brief=None):
     errors.extend(e)
     warnings.extend(w)
 
-    e = contrast.check(merged, profile)
+    e = contrast.check(merged, profile, warnings=warnings)
     errors.extend(e)
 
     if brief is not None:

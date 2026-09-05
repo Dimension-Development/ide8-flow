@@ -8,7 +8,7 @@ export default function AssetsView() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () =>
-    api.assets().then((d) => setAssets(d.assets)).catch((e) =>
+    api.assets().then((d) => { setAssets(d.assets); setError(null); }).catch((e) =>
       setError(String(e)));
 
   useEffect(() => {
@@ -46,12 +46,17 @@ export default function AssetsView() {
         <div>
           <h1 className="font-serif text-3xl font-bold">Image assets</h1>
           <p className="mt-1 text-sm text-ink-soft">
-            Uploaded assets are offered to the engine by name — concepts may
-            only place images from this library (write-once; missing
-            references fail validation).
+            {assets ? `${assets.length} images available. ` : ""}
+            Choose images from this library when preparing a brief.
+            Source folders and onboarding previews are not imported automatically.
           </p>
         </div>
-        <label className="cursor-pointer rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-cream transition hover:bg-ink-soft">
+        <div className="ml-4 flex shrink-0 flex-col items-end gap-2">
+          <button onClick={load} disabled={busy}
+            className="text-sm font-semibold text-ink-soft hover:text-ink disabled:opacity-40">
+            Refresh library
+          </button>
+          <label className="cursor-pointer rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-cream transition hover:bg-ink-soft">
           {busy ? "Uploading…" : "Upload image"}
           <input
             ref={fileRef}
@@ -61,7 +66,8 @@ export default function AssetsView() {
             disabled={busy}
             onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
           />
-        </label>
+          </label>
+        </div>
       </div>
       {error && <p className="mb-4 text-sm text-brand">{error}</p>}
       {!assets ? (
@@ -78,7 +84,7 @@ export default function AssetsView() {
               key={a.name}
               className="overflow-hidden rounded-xl border border-ink/10 bg-paper shadow-sm"
             >
-              <div className="flex aspect-square items-center justify-center bg-ink/5 p-3">
+              <div className="flex aspect-square items-center justify-center bg-slate-600 p-3">
                 <img
                   src={api.assetUrl(a.name)}
                   alt={a.name}

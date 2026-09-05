@@ -75,7 +75,7 @@ class TestSchemaRouting(unittest.TestCase):
                 concept = db.create_concept({"title": version}, "")
                 parent = db.add_version(
                     concept, doc, schema_version=version, prompt_pack=version,
-                    validation={"ok": True})
+                    validation={"ok": True}, effective_profile=PROFILE)
                 new_id, result = mutate_and_store(
                     parent, "retain version", store=db,
                     client=ScriptedClient([emit_resp(doc)]), render=FakeRender(),
